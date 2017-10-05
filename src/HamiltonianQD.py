@@ -26,26 +26,28 @@ def _J(l, d=0):
     return fn_j
 
 
-def _spherical_bessel1(l, fn, d=0):
+def _spherical_bessel1(l, func, d=0):
     def fn_spb(z):
         if d == 0:
-            return fn(n=l, z=z, derivative=False)
+            return func(n=l, z=z, derivative=False)
         elif d == 1:
-            return fn(n=l, z=z, derivative=True)
+            return func(n=l, z=z, derivative=True)
+        elif l == 0:
+            return -_spherical_bessel1(l=1, func=func, d=d - 1)(z)
         else:
             return (
-                _spherical_bessel1(l=l-1, fn=fn, d=d-1)(z) -
-                (l+1)/2 * _spherical_bessel1(l=l, fn=fn, d=d-1)(z)
+                _spherical_bessel1(l=l-1, func=func, d=d - 1)(z) -
+                (l+1) / 2 * _spherical_bessel1(l=l, func=func, d=d - 1)(z)
             )
     return fn_spb
 
 
 def _j(l, d=0):
-    return _spherical_bessel1(l=l, fn=sp.spherical_jn, d=d)
+    return _spherical_bessel1(l=l, func=sp.spherical_jn, d=d)
 
 
 def _i(l, d=0):
-    return _spherical_bessel1(l=l, fn=sp.spherical_in, d=d)
+    return _spherical_bessel1(l=l, func=sp.spherical_in, d=d)
 
 
 def _g(l, d=0):
@@ -78,7 +80,7 @@ class HamiltonianRoca:
         """
         h = self._C_F(r) * self.R * sqrt(2*pi)
         hi = 0
-        for l in range(self.l_max):
+        for l in range(self.l_max+1):
             h_l = (2*l + 1) * 1j**l
             h_li = 0
             for m in range(-l, l+1):
@@ -115,20 +117,30 @@ class HamiltonianRoca:
                 z = zeros.pop()
                 return dp(nu, zeros) * (nu - z) + p(nu, zeros)
 
-        def fun(nu, zsf):
+        def fun(nu, *args):
+            zeros = args[0]
             nu = nu[0] + 1j*nu[1]
-            fun_nu = fun0(nu) / p(nu, zeros=zsf)
+            fun_nu = complex(fun0(nu) / p(nu, zeros=zeros))
             return np.array([fun_nu.real, fun_nu.imag])
 
-        def jac(nu, zsf):
-            pk = p(nu, zeros=zsf)
-            dpk = dp(nu, zeros=zsf)
-            return jac0(nu) / pk - fun0(nu) * dpk / pk**2
+        def jac(nu, *args):
+            zeros = args[0]
+            nu = nu[0] + 1j*nu[1]
+            pk = p(nu, zeros=zeros)
+            dpk = dp(nu, zeros=zeros)
+            jac_nu = complex(jac0(nu) / pk - fun0(nu) * dpk / pk**2)
+            return np.array([[jac_nu.real, jac_nu.imag],
+                             [-jac_nu.imag, jac_nu.real]])
 
         zsf = []
-        x0 = np.array([0, 0])
+        x0 = np.array([1., 1.])
+        print(opt.check_grad(fun, jac, x0, []))
+        assert False
         while True:
-            result = opt.root(fun=fun, jac=jac, args=(zsf,), x0=x0)
+            if jac0 is None:
+                result = opt.root(fun=fun, jac=None, args=(zsf,), x0=x0)
+            else:
+                result = opt.root(fun=fun, jac=jac, args=(zsf,), x0=x0)
             if not result.success:
                 break
             solution_nu = result.x[0] + 1j*result.x[1]
@@ -160,6 +172,7 @@ class HamiltonianRoca:
                 return ddj * dg * gam + dj * ddg * gam + dj * dg * dgam
 
             return self._gen_nu_abstract(fun0=fun0, jac0=jac0)
+            # return self._gen_nu_abstract(fun0=fun0, jac0=None)
         return fn_gen_nu_large_r
 
     def _gen_nu_full(self, l):
@@ -179,7 +192,7 @@ class HamiltonianRoca:
                 self.constants.epsilon_0 / self._epsilon_inf(r=r))
 
     def omega2_TO(self, r):
-        if hasattr(self._omega_TO_fn, '__call__'):
+        if callable(self._omega_TO_fn):
             return self._omega_TO_fn(r)**2
         else:
             return self._omega_TO_fn**2
@@ -221,16 +234,10 @@ class HamiltonianRoca:
             return 0
 
     def _beta2_T(self, r):
-        if hasattr(self._beta_T_fn, '__call__'):
-            return self._beta_T_fn(r)**2
-        else:
-            return self._beta_T_fn**2
+        return self._beta_T_fn**2
 
     def _beta2_L(self, r):
-        if hasattr(self._beta_L_fn, '__call__'):
-            return self._beta_L_fn(r)**2
-        else:
-            return self._beta_L_fn**2
+        return self._beta_L_fn**2
 
     def _C_F(self, r):
         e = self.constants.e
