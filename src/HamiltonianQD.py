@@ -6,12 +6,18 @@ field.
 The definitions used in the theoretical model are based on
 Sec. III of "Polar optical vibrations in quantum dots" by Roca et. al.
 """
-from math import sqrt, pi
+from math import pi
 import qutip as qt
 import itertools as it
 import numpy as np
 import scipy.optimize as opt
 import scipy.special as sp
+import warnings
+from matplotlib import pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from collections import deque
+
+warnings.filterwarnings('error')
 
 
 def _Y(l, m):
@@ -78,7 +84,7 @@ class HamiltonianRoca:
         """Electron-phonon interaction Hamiltonian at spherical coordinates
         (r, theta, phi). The definition is based on (Roca, Eq. 42).
         """
-        h = self._C_F(r) * self.R * sqrt(2*pi)
+        h = self._C_F(r) * self.R * np.sqrt(2*pi)
         hi = 0
         for l in range(self.l_max+1):
             h_l = (2*l + 1) * 1j**l
@@ -102,7 +108,7 @@ class HamiltonianRoca:
         else:
             return self._gen_nu_full(l)
 
-    def _gen_nu_abstract(self, fun0, jac0):
+    def _gen_nu_abstract(self, fun0, jac0=None, ztr=None):
         def p(nu, zeros):
             p0 = 1
             for z in zeros:
@@ -119,60 +125,114 @@ class HamiltonianRoca:
 
         def fun(nu, *args):
             zeros = args[0]
-            nu = nu[0] + 1j*nu[1]
-            fun_nu = complex(fun0(nu) / p(nu, zeros=zeros))
-            return np.array([fun_nu.real, fun_nu.imag])
+            # nu = nu[0]
+            fun_nu = fun0(nu) / p(nu, zeros=zeros)
+            if ztr is not None:
+                fun_nu = ztr(fun_nu)
+            # fun_nu = complex(fun_nu)
+            # return np.array([fun_nu.real, fun_nu.imag])
+            return abs(fun_nu)
 
         def jac(nu, *args):
             zeros = args[0]
-            nu = nu[0] + 1j*nu[1]
+            # nu = nu[0]
             pk = p(nu, zeros=zeros)
             dpk = dp(nu, zeros=zeros)
             jac_nu = complex(jac0(nu) / pk - fun0(nu) * dpk / pk**2)
             return np.array([[jac_nu.real, jac_nu.imag],
                              [-jac_nu.imag, jac_nu.real]])
 
-        zsf = []
-        x0 = np.array([1., 1.])
-        print(opt.check_grad(fun, jac, x0, []))
-        assert False
+        all_zeros = list()
+        x0 = np.array([1.])
         while True:
-            if jac0 is None:
-                result = opt.root(fun=fun, jac=None, args=(zsf,), x0=x0)
-            else:
-                result = opt.root(fun=fun, jac=jac, args=(zsf,), x0=x0)
+            # if jac0 is None:
+            #     result = opt.root(fun=fun, jac=None, args=(all_zeros,), x0=x0)
+            # else:
+            #     result = opt.root(fun=fun, jac=jac, args=(all_zeros,), x0=x0)
+            result = opt.minimize_scalar(
+                fun=fun, bounds=(0., 20.), args=(all_zeros,)
+            )
+            # print(result.message)
+            print('success = {}'.format(result.success))
+            print('x = {}'.format(result.x))
+            print('f(x) = {}'.format(result.fun))
             if not result.success:
                 break
-            solution_nu = result.x[0] + 1j*result.x[1]
+            # solution_nu = result.x[0]
+            solution_nu = result.x
             yield solution_nu
-            zsf.append(solution_nu)
+            all_zeros.append(solution_nu)
 
     def _gen_nu_large_R(self, l):
         def fn_gen_nu_large_r(r, theta, phi):
-            def fun0(nu):
-                Q = self._Q(r=r, nu=nu)
-                return _J(l, d=1)(nu) * _g(l, d=1)(self._mu(r=r, nu=nu)) * (
-                    self._gamma_0(r) * l / Q + Q * self._lbar2(l)
+            R = self.R
+            q = self._q
+            Q = self._Q
+
+            def f1(nu):
+                return _J(l, d=1)(q(nu=nu) * R)
+
+            def f2(nu):
+                return _g(l, d=1)(Q(r=r, nu=nu))
+
+            def f3(nu):
+                Q0 = Q(r=r, nu=nu)
+                return (
+                    (self.omega2_L0(r=r) - self.omega2(r=r, nu=nu)) /
+                    self._beta2_T(r=r) * l / Q0 + Q0 * self._lbar2(l)
                 )
 
-            def jac0(nu):
-                mu = self._mu(r=r, nu=nu)
-                dmu = self._mu(r=r, nu=nu, dnu=1)
-                Q = self._Q(r=r, nu=nu)
-                dQ = self._Q(r=r, nu=nu, dnu=1)
-                gam0 = self._gamma_0(r)
-                dgam0 = self._gamma_0(r=r, d=1)
-                ll = self._lbar2(l)
-                dj = _J(l=l, d=1)(nu)
-                ddj = _J(l=l, d=2)(nu)
-                dg = _g(l=l, d=1)(mu)
-                ddg = dmu * _g(l=l, d=2)(mu)
-                gam = (gam0 * l/Q + Q * ll)
-                dgam = l * (dgam0/Q-gam0*dQ/Q**2) + dQ * ll
-                return ddj * dg * gam + dj * ddg * gam + dj * dg * dgam
+            def fprod(nu):
+                return f1(nu) * f2(nu) * f3(nu)
 
-            return self._gen_nu_abstract(fun0=fun0, jac0=jac0)
-            # return self._gen_nu_abstract(fun0=fun0, jac0=None)
+            def ztr(z):
+                return abs(z)
+
+            xdat = np.linspace(-10, 10, 101)
+            ydat = np.linspace(-1e-6, 1e-6, 101)
+            xdat, ydat = np.meshgrid(xdat, ydat)
+
+            # zdat = np.empty_like(xdat)
+            # for i, j in it.product(range(len(xdat)), repeat=2):
+            #     zdat[i, j] = abs(f1(xdat[i, j] + 1j*ydat[i, j]))
+            # n = len(zdat)
+            # fig, ax = plt.subplots(1, 1)
+            # cs = ax.contourf(xdat, ydat, zdat, n)
+            # fig.colorbar(cs)
+            # plt.show()
+
+            # zdat = np.empty_like(xdat)
+            # for i, j in it.product(range(len(xdat)), repeat=2):
+            #     zdat[i, j] = abs(f2(xdat[i, j] + 1j*ydat[i, j]))
+            # n = len(zdat)
+            # fig, ax = plt.subplots(1, 1)
+            # cs = ax.contourf(xdat, ydat, zdat, n)
+            # fig.colorbar(cs)
+            # plt.show()
+
+            # zdat = np.empty_like(xdat)
+            # for i, j in it.product(range(len(xdat)), repeat=2):
+            #     zdat[i, j] = abs(f3(xdat[i, j] + 1j*ydat[i, j]))
+            # n = len(zdat)
+            # fig, ax = plt.subplots(1, 1)
+            # cs = ax.contourf(xdat, ydat, zdat, n)
+            # fig.colorbar(cs)
+            # plt.show()
+
+            zdat = np.empty_like(xdat)
+            for i, j in it.product(range(len(xdat)), repeat=2):
+                zdat[i, j] = ztr(fprod(xdat[i, j] + 1j*ydat[i, j]))
+            n = len(zdat)
+            fig, ax = plt.subplots(1, 1)
+            cs = ax.contourf(xdat, ydat, zdat, n)
+            fig.colorbar(cs)
+            plt.show()
+
+            return map(lambda nu: nu.real, it.chain(
+                self._gen_nu_abstract(fun0=f1, jac0=None, ztr=ztr),
+                self._gen_nu_abstract(fun0=f2, jac0=None, ztr=ztr),
+                self._gen_nu_abstract(fun0=f3, jac0=None, ztr=ztr),
+            ))
         return fn_gen_nu_large_r
 
     def _gen_nu_full(self, l):
@@ -181,8 +241,8 @@ class HamiltonianRoca:
     def _lbar2(self, l):
         return l + (l + 1) * self._epsdiv
 
-    def _gamma_0(self, r, d=0):
-        if d > 0:
+    def _gamma_0(self, r, dnu=0):
+        if dnu > 0:
             return 0
         else:
             return (self.omega2_L0(r) - self.omega2_TO(r)) / self._beta2_T(r)
@@ -200,23 +260,23 @@ class HamiltonianRoca:
     def _mu(self, r, nu, dnu=0):
         return self._Q(r=r, nu=nu, dnu=dnu) * self.R
 
-    def _Q(self, r, nu, dnu=0, domega=0):
-        if domega == 0 and dnu == 0:
-            return sqrt(
-                (self.omega2_TO(r=r) - self.omega2(r=r, nu=nu)) /
-                self._beta2_T(r=r)
-            )
-        elif dnu == 0 and domega == 1:
-            return -self.omega(r=r, nu=nu) / self._Q(r=r, nu=nu)
-        elif dnu == 1 and domega == 0:
-            return self._Q(r=r, nu=nu, domega=1) * self.omega(r=r, nu=nu, dnu=1)
+    def _Q(self, r, nu, dnu=0):
+        return (
+            self._beta2_L(r=r)/self._beta2_T(r=r) *
+            self._q(nu=nu, dnu=dnu) - self._gamma_0(r=r, dnu=dnu)
+        )
+
+    def _q(self, nu, dnu=0):
+        if dnu == 0:
+            return nu / self.R
+        elif dnu == 1:
+            return 1 / self.R
         else:
-            print('Why am I here?')  # TODO define this behavior
-            raise RuntimeError
+            return 0
 
     def omega(self, r, nu, dnu=0):
         if dnu == 0:
-            return sqrt(self.omega2(r=r, nu=nu))
+            return np.sqrt(complex(self.omega2(r=r, nu=nu)))
         elif dnu == 1:
             return self.omega2(r=r, nu=nu, dnu=1) / 2 / self.omega(r=r, nu=nu)
         else:
@@ -243,8 +303,8 @@ class HamiltonianRoca:
         e = self.constants.e
         h = self.constants.h
         eps0 = self.constants.epsilon_0
-        return e * sqrt(
-            h * sqrt(self.omega2_L0(r=r)) / self.V_0 *
+        return e * np.sqrt(
+            h * np.sqrt(self.omega2_L0(r=r)) / self.V_0 *
             (1/self._epsilon_inf(r=r) - 1/eps0)
         )
 
