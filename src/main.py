@@ -6,17 +6,17 @@ ModelConstants = namedtuple('ModelConstants', ['epsilon_0', 'e', 'h'])
 
 
 ham = HamiltonianRoca(
-    R=10,
-    omega_TO=36,
-    l_max=0,
-    epsilon_inf_qdot=1/8.9,
+    R=99999,
+    omega_TO=1/999999,
+    l_max=1,
+    epsilon_inf_qdot=1/9,
     epsilon_inf_env=1,
     constants=ModelConstants(epsilon_0=1, e=1, h=1),
     beta_L=1,
-    beta_T=1,
+    beta_T=9,
 )
 
-r = ham.R/2
+r = ham.R
 
 for l in range(ham.l_max+1):
     nulist = []

@@ -10,8 +10,11 @@ from math import pi
 import qutip as qt
 import itertools as it
 import numpy as np
-import scipy.optimize as opt
-import scipy.special as sp
+from scipy import optimize as opt
+from scipy import special as sp
+from scipy import fftpack as ft
+from scipy import linalg as lin
+from scipy import interpolate as interp
 import warnings
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -173,7 +176,7 @@ class HamiltonianRoca:
                 return _J(l, d=1)(q(nu=nu) * R)
 
             def f2(nu):
-                return _g(l, d=1)(Q(r=r, nu=nu))
+                return _g(l, d=1)(Q(r=r, nu=nu) * R)
 
             def f3(nu):
                 Q0 = Q(r=r, nu=nu)
@@ -188,13 +191,31 @@ class HamiltonianRoca:
             def ztr(z):
                 return abs(z)
 
-            xdat = np.linspace(-10, 10, 101)
-            ydat = np.linspace(-1e-6, 1e-6, 101)
-            xdat, ydat = np.meshgrid(xdat, ydat)
+            # xdat = np.linspace(-10, 10, 101)
+            # ydat = np.linspace(-1e-6, 1e-6, 101)
+            # xdat, ydat = np.meshgrid(xdat, ydat)
 
             # zdat = np.empty_like(xdat)
             # for i, j in it.product(range(len(xdat)), repeat=2):
-            #     zdat[i, j] = abs(f1(xdat[i, j] + 1j*ydat[i, j]))
+            #     zdat[i, j] = ztr(f1(xdat[i, j] + 1j*ydat[i, j]))
+            # n = len(zdat)
+            # fig, ax = plt.subplots(1, 1)
+            # cs = ax.contourf(xdat, ydat, zdat, n)
+            # fig.colorbar(cs)
+            # plt.show()
+            #
+            # zdat = np.empty_like(xdat)
+            # for i, j in it.product(range(len(xdat)), repeat=2):
+            #     zdat[i, j] = ztr(f2(xdat[i, j] + 1j*ydat[i, j]))
+            # n = len(zdat)
+            # fig, ax = plt.subplots(1, 1)
+            # cs = ax.contourf(xdat, ydat, zdat, n)
+            # fig.colorbar(cs)
+            # plt.show()
+            #
+            # zdat = np.empty_like(xdat)
+            # for i, j in it.product(range(len(xdat)), repeat=2):
+            #     zdat[i, j] = ztr(f3(xdat[i, j] + 1j*ydat[i, j]))
             # n = len(zdat)
             # fig, ax = plt.subplots(1, 1)
             # cs = ax.contourf(xdat, ydat, zdat, n)
@@ -203,36 +224,72 @@ class HamiltonianRoca:
 
             # zdat = np.empty_like(xdat)
             # for i, j in it.product(range(len(xdat)), repeat=2):
-            #     zdat[i, j] = abs(f2(xdat[i, j] + 1j*ydat[i, j]))
+            #     zdat[i, j] = ztr(fprod(xdat[i, j] + 1j*ydat[i, j]))
             # n = len(zdat)
             # fig, ax = plt.subplots(1, 1)
             # cs = ax.contourf(xdat, ydat, zdat, n)
             # fig.colorbar(cs)
             # plt.show()
 
-            # zdat = np.empty_like(xdat)
-            # for i, j in it.product(range(len(xdat)), repeat=2):
-            #     zdat[i, j] = abs(f3(xdat[i, j] + 1j*ydat[i, j]))
-            # n = len(zdat)
-            # fig, ax = plt.subplots(1, 1)
-            # cs = ax.contourf(xdat, ydat, zdat, n)
-            # fig.colorbar(cs)
-            # plt.show()
+            xlen = 20000
+            xmin = 0
+            xmax = xlen
+            xpts = 1000001
 
-            zdat = np.empty_like(xdat)
-            for i, j in it.product(range(len(xdat)), repeat=2):
-                zdat[i, j] = ztr(fprod(xdat[i, j] + 1j*ydat[i, j]))
-            n = len(zdat)
-            fig, ax = plt.subplots(1, 1)
-            cs = ax.contourf(xdat, ydat, zdat, n)
-            fig.colorbar(cs)
+            xdat0 = np.linspace(xmin, xmax, xpts)
+            ydat0 = np.array([f1(x) * f2(x) * f3(x) for x in xdat0])
+
+            xdat = xdat0[~np.isnan(ydat0)]
+            ydat = ydat0[~np.isnan(ydat0)]
+
+            kdat = np.arange(xpts)[~np.isnan(ydat0)]
+            ykdat_cplx = ft.fft(ydat)
+            ykdat_real = np.real(ykdat_cplx)
+            ykdat_imag = np.imag(ykdat_cplx)
+
+            ykdat_real_fn = interp.interp1d(kdat, ykdat_real, kind='cubic')
+            ykdat_imag_fn = interp.interp1d(kdat, ykdat_imag, kind='cubic')
+
+            omegkdat = np.linspace(2*pi*kdat[0]/xlen, 2*pi*kdat[50]/xlen, xpts)
+            yomegdat_real = ykdat_real_fn(omegkdat*xlen/2/pi)
+            yomegdat_imag = ykdat_imag_fn(omegkdat*xlen/2/pi)
+
+            fig, ax = plt.subplots(2, 1)
+            ax[0].plot(xdat, ydat, '-', color='black')
+            ax[1].plot(omegkdat, yomegdat_real, '-', color='red')
+            ax[1].plot(omegkdat, yomegdat_imag, '-', color='blue')
+
+            xmaxr, ymaxr = max(zip(omegkdat, yomegdat_real),
+                               key=lambda x: abs(x[1]))
+            xmaxi, ymaxi = max(zip(omegkdat, yomegdat_imag),
+                               key=lambda x: abs(x[1]))
+
+            lammaxr = 2 * pi / xmaxr
+            lammaxi = 2 * pi / xmaxi
+            print(lammaxr)
+            print(lammaxi)
+            for i in it.count():
+                if lammaxi * i < xdat[-1]:
+                    ax[0].axvline(lammaxi * i, color='blue', alpha=.5, lw=.5)
+                if lammaxr * i < xdat[-1]:
+                    ax[0].axvline(lammaxr * i, color='red', alpha=.5, lw=.5)
+                if lammaxi*i > xdat[-1] and lammaxr*i > xdat[-1]:
+                    break
             plt.show()
 
-            return map(lambda nu: nu.real, it.chain(
-                self._gen_nu_abstract(fun0=f1, jac0=None, ztr=ztr),
-                self._gen_nu_abstract(fun0=f2, jac0=None, ztr=ztr),
-                self._gen_nu_abstract(fun0=f3, jac0=None, ztr=ztr),
-            ))
+            omeg2 = self.omega2_TO(r=r) * (
+                (self.constants.epsilon_0 * l + self.epsilon_inf2 * (l + 1)) /
+                (self.epsilon_inf1 * l + self.epsilon_inf2 * (l + 1))
+            )
+            yield R * np.sqrt(
+                (self.omega2_L0(r=r) - omeg2) / self._beta2_L(r=r)
+            )
+
+            # return map(lambda nu: nu.real, it.chain(
+            #     self._gen_nu_abstract(fun0=f1, jac0=None, ztr=ztr),
+            #     self._gen_nu_abstract(fun0=f2, jac0=None, ztr=ztr),
+            #     self._gen_nu_abstract(fun0=f3, jac0=None, ztr=ztr),
+            # ))
         return fn_gen_nu_large_r
 
     def _gen_nu_full(self, l):
@@ -285,11 +342,11 @@ class HamiltonianRoca:
 
     def omega2(self, r, nu, dnu=0):
         if dnu == 0:
-            return self.omega2_L0(r=r) - self._beta2_L(r=r) * nu**2
+            return self.omega2_L0(r=r) - self._beta2_L(r=r) * (nu / self.R)**2
         elif dnu == 1:
-            return -2 * self._beta2_L(r=r) * nu
+            return -2 * self._beta2_L(r=r) * nu / self.R**2
         elif dnu == 2:
-            return -2 * self._beta2_L(r=r)
+            return -2 * self._beta2_L(r=r) / self.R**2
         else:
             return 0
 
