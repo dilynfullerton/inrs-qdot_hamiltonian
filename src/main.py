@@ -21,7 +21,7 @@ r = ham.R
 for l in range(ham.l_max+1):
     nulist = []
     omlist = []
-    for nu in ham._gen_nu(l)(r=r, theta=0, phi=0):
+    for nu in ham._gen_nu(l)(r=r):
         nulist.append(nu)
         omlist.append(ham.omega(r=r, nu=nu))
     print('l = {}'.format(l))

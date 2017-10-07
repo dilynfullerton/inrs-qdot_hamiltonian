@@ -73,7 +73,8 @@ def _g(l, d=0):
 
 class HamiltonianRoca:
     def __init__(self, R, omega_TO, l_max, epsilon_inf_qdot, epsilon_inf_env,
-                 constants, beta_T, beta_L, large_R_approximation=True):
+                 constants, beta_T, beta_L, large_R_approximation=True,
+                 omega_min=None, omega_max=None, omega_resolution=1001):
         self.R = R
         self.V_0 = 4/3 * pi * R**3
         self.l_max = l_max
@@ -85,6 +86,9 @@ class HamiltonianRoca:
         self._beta_T_fn = beta_T
         self._beta_L_fn = beta_L
         self._omega_TO_fn = omega_TO
+        self._omega_res = omega_resolution
+        self._omega_min_fn = omega_min
+        self._omega_max_fn = omega_max
 
     def h(self, r, theta, phi):
         """Electron-phonon interaction Hamiltonian at spherical coordinates
@@ -98,7 +102,7 @@ class HamiltonianRoca:
             for m in range(-l, l+1):
                 h_m = _Y(l, m)(theta, phi)
                 h_mi = 0
-                for nu_nl, n in zip(self._gen_nu(l)(r, theta, phi), it.count()):
+                for nu_nl, n in zip(self._gen_nu(l)(r), it.count()):
                     h_mi += (
                         1 / nu_nl *
                         self._Phibar(nu_nl, l)(r) *
@@ -114,155 +118,17 @@ class HamiltonianRoca:
         else:
             return self._gen_nu_full(l)
 
-    def _gen_nu_abstract(self, fun0, jac0=None, ztr=None):
-        def p(nu, zeros):
-            if nu in zeros:
-                return 1
-            p0 = 1
-            for z in zeros:
-                p0 *= (nu - z)
-            return p0
+    def _nu_min(self, r):
+        return self._nu(omega2=self._omega2_max(r=r), r=r)
 
-        def dp(nu, zeros):
-            zeros = list(zeros)
-            if len(zeros) == 0:
-                return 0
-            else:
-                z = zeros.pop()
-                return dp(nu, zeros) * (nu - z) + p(nu, zeros)
+    def _nu_max(self, r):
+        return self._nu(omega2=self._omega2_min(r=r), r=r)
 
-        def fun(nu, *args):
-            nu = nu[0]
-            if len(args) == 0:
-                return fun([nu], [])
-            elif len(args) == 1:
-                zeros = args[0]
-                p0 = p(nu, zeros=zeros)
-                return np.log(1 + abs(fun0(nu) / p0))
-            elif len(args) == 3:
-                zeros, smooth, npts = args
-                if not smooth:
-                    return fun([nu], zeros)
-                xnu = np.linspace(nu-5, nu+5, npts)
-                ynu = np.array([fun([x], zeros) for x in xnu])
-                ifn = interp.interp1d(xnu, ynu, kind='cubic')
-                return ifn(nu)
-            else:
-                assert len(args) > 3
-                zeros, smooth, npts, p_curr, p_prev, line0, line, ax1, ax2, zpoints, = args
-                fun_nu = fun([nu], zeros, smooth, npts)
-                tm.sleep(.5)
-                plt.pause(.0001)
-                p_prev.set_xdata(np.array(p_curr.get_xdata(orig=True)))
-                p_prev.set_ydata(np.array(p_curr.get_ydata(orig=True)))
-                p_curr.set_xdata(np.array([nu]))
-                p_curr.set_ydata(np.array([fun_nu]))
-                # Move x axis
-                xdat = np.linspace(nu-5, nu+5, npts)
-                ydat0 = np.array([fun([x]) for x in xdat])
-                ydat = np.array([fun([x], zeros) for x in xdat])
-                zx = list(filter(lambda x: xdat[0] < x < xdat[-1],
-                                 zpoints.get_xdata()))
-                zy = np.array([fun([x]) for x in zx])
-                zpoints.set_xdata(zx)
-                zpoints.set_ydata(zy)
-                line0.set_xdata(xdat)
-                line0.set_ydata(ydat0)
-                line.set_xdata(xdat)
-                line.set_ydata(ydat)
-                ax1.relim()
-                ax1.autoscale_view()
-                ax2.relim()
-                ax2.autoscale_view()
-                # Draw
-                fig.canvas.draw()
-                fig.canvas.flush_events()
-                plt.pause(.0001)
-                return fun_nu
-
-        def jac(nu, *args):
-            zeros = args[0]
-            # nu = nu[0]
-            pk = p(nu, zeros=zeros)
-            dpk = dp(nu, zeros=zeros)
-            jac_nu = complex(jac0(nu) / pk - fun0(nu) * dpk / pk**2)
-            return np.array([[jac_nu.real, jac_nu.imag],
-                             [-jac_nu.imag, jac_nu.real]])
-
-        npts = 1001
-        xdat = np.linspace(-5, 5, npts)
-        ydat0 = np.array([fun([x], []) for x in xdat])
-        ydat = np.array([fun([x], []) for x in xdat])
-
-        plt.ion()
-        fig, ax1 = plt.subplots(1, 1)
-        ax2 = ax1.twinx()
-        line0, = ax1.plot(xdat, ydat0, color='blue')
-        line, = ax2.plot(xdat, ydat, color='orange')
-        point_curr, = ax2.plot([0], [0], '.', color='green')
-        point_prev, = ax2.plot([0], [0], '.', color='green', alpha=.25)
-        zpoints, = ax1.plot([], [], '.', color='red')
-        plt.show()
-
-        all_zeros = list()
-        # x0 = np.array([1.])
-        while True:
-            tm.sleep(1)
-            if len(all_zeros) == 0:
-                x0 = np.array([0.])
-            elif len(all_zeros) == 1:
-                x0 = np.array([all_zeros[0] + 1.])
-            else:
-                xl, xr = sorted(all_zeros)[:2]
-                x0 = np.array([(xl + xr)/2])
-            # if jac0 is None:
-            #     result = opt.root(fun=fun, jac=None, args=(all_zeros,), x0=x0)
-            # else:
-            #     result = opt.root(fun=fun, jac=jac, args=(all_zeros,), x0=x0)
-            result = opt.minimize(
-                fun=fun, x0=x0,
-                args=(all_zeros, True, npts, point_curr, point_prev,
-                      line0, line, ax1, ax2, zpoints,),
-
-            )
-            print()
-            print('x = {}'.format(result.x))
-            print('f(x) = {}'.format(result.fun))
-            print('success = {}'.format(result.success))
-            # print(result.message)
-            if not result.success:
-                break
-            # solution_nu = result.x[0]
-            solution_nu = result.x
-            yield solution_nu
-            all_zeros.append(solution_nu)
-            # Update plot
-            plt.pause(.0001)
-            xdat = np.linspace(result.x-5, result.x+5, npts)
-            ydat0 = np.array([fun([x], []) for x in xdat])
-            ydat = np.array([fun([x], all_zeros) for x in xdat])
-            zx = list(filter(lambda x: xdat[0] < x < xdat[-1], all_zeros))
-            zy = np.array([fun([x], []) for x in zx])
-            zpoints.set_xdata(zx)
-            zpoints.set_ydata(zy)
-            line0.set_xdata(xdat)
-            line.set_xdata(xdat)
-            line0.set_ydata(ydat0)
-            line.set_ydata(ydat)
-            point_curr.set_xdata([result.x])
-            point_curr.set_ydata([result.fun])
-            point_prev.set_xdata([result.x])
-            point_prev.set_ydata([result.fun])
-            ax1.relim()
-            ax1.autoscale_view()
-            ax2.relim()
-            ax2.autoscale_view()
-            fig.canvas.draw()
-            fig.canvas.flush_events()
-            plt.pause(.0001)
+    def _nu_res(self):
+        return self._omega_res
 
     def _gen_nu_large_R(self, l):
-        def fn_gen_nu_large_r(r, theta, phi):
+        def fn_gen_nu_large_r(r):
             R = self.R
             q = self._q
             Q = self._Q
@@ -277,7 +143,7 @@ class HamiltonianRoca:
             def f3(nu):
                 Q0 = Q(r=r, nu=nu)
                 return (
-                    (self.omega2_L0(r=r) - self.omega2(r=r, nu=nu)) /
+                    (self.omega2_LO(r=r) - self.omega2(r=r, nu=nu)) /
                     self._beta2_T(r=r) * l / Q0 + Q0 * self._lbar2(l)
                 )
 
@@ -287,7 +153,8 @@ class HamiltonianRoca:
                 c3 = f3(nu)
                 return c1 * c2 * c3
 
-            xdat = np.linspace(self._nu_min(), self._nu_max(), self._nu_res())
+            xdat = np.linspace(
+                self._nu_min(r=r), self._nu_max(r=r), self._nu_res())
             ydat = np.array([fprod(x) for x in xdat])
 
             xdat0 = xdat[~np.isnan(ydat)]
@@ -308,16 +175,12 @@ class HamiltonianRoca:
                 (self.epsilon_inf1 * l + self.epsilon_inf2 * (l + 1))
             )
             nu_theor = R * np.sqrt(
-                (self.omega2_L0(r=r) - omeg2) / self._beta2_L(r=r)
+                (self.omega2_LO(r=r) - omeg2) / self._beta2_L(r=r)
             )
             print('nu_th = {}'.format(nu_theor))
-            # yield nu_theor
+            print('nu_num = {}'.format(roots))
 
-            return map(lambda nu: nu.real, it.chain(
-                self._gen_nu_abstract(fun0=f1),
-                self._gen_nu_abstract(fun0=f2),
-                self._gen_nu_abstract(fun0=f3),
-            ))
+            return iter(roots)
         return fn_gen_nu_large_r
 
     def _gen_nu_full(self, l):
@@ -330,9 +193,9 @@ class HamiltonianRoca:
         if dnu > 0:
             return 0
         else:
-            return (self.omega2_L0(r) - self.omega2_TO(r)) / self._beta2_T(r)
+            return (self.omega2_LO(r) - self.omega2_TO(r)) / self._beta2_T(r)
 
-    def omega2_L0(self, r):
+    def omega2_LO(self, r):
         return (self.omega2_TO(r) *
                 self.constants.epsilon_0 / self._epsilon_inf(r=r))
 
@@ -341,6 +204,29 @@ class HamiltonianRoca:
             return self._omega_TO_fn(r)**2
         else:
             return self._omega_TO_fn**2
+
+    def _omega2_min(self, r):
+        if self._omega_min_fn is None:
+            omega2to = self.omega2_TO(r=r)
+            return omega2to + (self.omega2_LO(r=r)-omega2to)/self._omega_res
+        elif callable(self._omega_min_fn):
+            return self._omega_min_fn(r=r)**2
+        else:
+            return self._omega_min_fn**2
+
+    def _omega2_max(self, r):
+        if self._omega_max_fn is None:
+            omega2lo = self.omega2_LO(r=r)
+            return omega2lo - (omega2lo-self.omega2_TO(r=r))/self._omega_res
+        elif callable(self._omega_max_fn):
+            return self._omega_max_fn(r=r)**2
+        else:
+            return self._omega_max_fn**2
+
+    def _nu(self, omega2, r):
+        return self.R * np.sqrt(
+            (self.omega2_LO(r=r) - omega2) / self._beta2_L(r=r)
+        )
 
     def _mu(self, r, nu, dnu=0):
         return self._Q(r=r, nu=nu, dnu=dnu) * self.R
@@ -370,7 +256,7 @@ class HamiltonianRoca:
 
     def omega2(self, r, nu, dnu=0):
         if dnu == 0:
-            return self.omega2_L0(r=r) - self._beta2_L(r=r) * (nu / self.R)**2
+            return self.omega2_LO(r=r) - self._beta2_L(r=r) * (nu / self.R)**2
         elif dnu == 1:
             return -2 * self._beta2_L(r=r) * nu / self.R**2
         elif dnu == 2:
@@ -389,7 +275,7 @@ class HamiltonianRoca:
         h = self.constants.h
         eps0 = self.constants.epsilon_0
         return e * np.sqrt(
-            h * np.sqrt(self.omega2_L0(r=r)) / self.V_0 *
+            h * np.sqrt(self.omega2_LO(r=r)) / self.V_0 *
             (1/self._epsilon_inf(r=r) - 1/eps0)
         )
 
