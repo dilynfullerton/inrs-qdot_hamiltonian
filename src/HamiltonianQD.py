@@ -19,6 +19,7 @@ import warnings
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from collections import deque
+import time as tm
 
 warnings.filterwarnings('error')
 
@@ -62,9 +63,11 @@ def _i(l, d=0):
 def _g(l, d=0):
     def fn_g(z):
         if z**2 >= 0:
-            return _j(l, d)(z)
+            j = _j(l, d)(z)
+            return j
         else:
-            return _i(l, d)(z)
+            i = _i(l, d)(z)
+            return i
     return fn_g
 
 
@@ -113,6 +116,8 @@ class HamiltonianRoca:
 
     def _gen_nu_abstract(self, fun0, jac0=None, ztr=None):
         def p(nu, zeros):
+            if nu in zeros:
+                return 1
             p0 = 1
             for z in zeros:
                 p0 *= (nu - z)
@@ -127,14 +132,53 @@ class HamiltonianRoca:
                 return dp(nu, zeros) * (nu - z) + p(nu, zeros)
 
         def fun(nu, *args):
-            zeros = args[0]
-            # nu = nu[0]
-            fun_nu = fun0(nu) / p(nu, zeros=zeros)
-            if ztr is not None:
-                fun_nu = ztr(fun_nu)
-            # fun_nu = complex(fun_nu)
-            # return np.array([fun_nu.real, fun_nu.imag])
-            return abs(fun_nu)
+            nu = nu[0]
+            if len(args) == 0:
+                return fun([nu], [])
+            elif len(args) == 1:
+                zeros = args[0]
+                p0 = p(nu, zeros=zeros)
+                return np.log(1 + abs(fun0(nu) / p0))
+            elif len(args) == 3:
+                zeros, smooth, npts = args
+                if not smooth:
+                    return fun([nu], zeros)
+                xnu = np.linspace(nu-5, nu+5, npts)
+                ynu = np.array([fun([x], zeros) for x in xnu])
+                ifn = interp.interp1d(xnu, ynu, kind='cubic')
+                return ifn(nu)
+            else:
+                assert len(args) > 3
+                zeros, smooth, npts, p_curr, p_prev, line0, line, ax1, ax2, zpoints, = args
+                fun_nu = fun([nu], zeros, smooth, npts)
+                tm.sleep(.5)
+                plt.pause(.0001)
+                p_prev.set_xdata(np.array(p_curr.get_xdata(orig=True)))
+                p_prev.set_ydata(np.array(p_curr.get_ydata(orig=True)))
+                p_curr.set_xdata(np.array([nu]))
+                p_curr.set_ydata(np.array([fun_nu]))
+                # Move x axis
+                xdat = np.linspace(nu-5, nu+5, npts)
+                ydat0 = np.array([fun([x]) for x in xdat])
+                ydat = np.array([fun([x], zeros) for x in xdat])
+                zx = list(filter(lambda x: xdat[0] < x < xdat[-1],
+                                 zpoints.get_xdata()))
+                zy = np.array([fun([x]) for x in zx])
+                zpoints.set_xdata(zx)
+                zpoints.set_ydata(zy)
+                line0.set_xdata(xdat)
+                line0.set_ydata(ydat0)
+                line.set_xdata(xdat)
+                line.set_ydata(ydat)
+                ax1.relim()
+                ax1.autoscale_view()
+                ax2.relim()
+                ax2.autoscale_view()
+                # Draw
+                fig.canvas.draw()
+                fig.canvas.flush_events()
+                plt.pause(.0001)
+                return fun_nu
 
         def jac(nu, *args):
             zeros = args[0]
@@ -145,26 +189,77 @@ class HamiltonianRoca:
             return np.array([[jac_nu.real, jac_nu.imag],
                              [-jac_nu.imag, jac_nu.real]])
 
+        npts = 1001
+        xdat = np.linspace(-5, 5, npts)
+        ydat0 = np.array([fun([x], []) for x in xdat])
+        ydat = np.array([fun([x], []) for x in xdat])
+
+        plt.ion()
+        fig, ax1 = plt.subplots(1, 1)
+        ax2 = ax1.twinx()
+        line0, = ax1.plot(xdat, ydat0, color='blue')
+        line, = ax2.plot(xdat, ydat, color='orange')
+        point_curr, = ax2.plot([0], [0], '.', color='green')
+        point_prev, = ax2.plot([0], [0], '.', color='green', alpha=.25)
+        zpoints, = ax1.plot([], [], '.', color='red')
+        plt.show()
+
         all_zeros = list()
-        x0 = np.array([1.])
+        # x0 = np.array([1.])
         while True:
+            tm.sleep(1)
+            if len(all_zeros) == 0:
+                x0 = np.array([0.])
+            elif len(all_zeros) == 1:
+                x0 = np.array([all_zeros[0] + 1.])
+            else:
+                xl, xr = sorted(all_zeros)[:2]
+                x0 = np.array([(xl + xr)/2])
             # if jac0 is None:
             #     result = opt.root(fun=fun, jac=None, args=(all_zeros,), x0=x0)
             # else:
             #     result = opt.root(fun=fun, jac=jac, args=(all_zeros,), x0=x0)
-            result = opt.minimize_scalar(
-                fun=fun, bounds=(0., 20.), args=(all_zeros,)
+            result = opt.minimize(
+                fun=fun, x0=x0,
+                args=(all_zeros, True, npts, point_curr, point_prev,
+                      line0, line, ax1, ax2, zpoints,),
+
             )
-            # print(result.message)
-            print('success = {}'.format(result.success))
+            print()
             print('x = {}'.format(result.x))
             print('f(x) = {}'.format(result.fun))
+            print('success = {}'.format(result.success))
+            # print(result.message)
             if not result.success:
                 break
             # solution_nu = result.x[0]
             solution_nu = result.x
             yield solution_nu
             all_zeros.append(solution_nu)
+            # Update plot
+            plt.pause(.0001)
+            xdat = np.linspace(result.x-5, result.x+5, npts)
+            ydat0 = np.array([fun([x], []) for x in xdat])
+            ydat = np.array([fun([x], all_zeros) for x in xdat])
+            zx = list(filter(lambda x: xdat[0] < x < xdat[-1], all_zeros))
+            zy = np.array([fun([x], []) for x in zx])
+            zpoints.set_xdata(zx)
+            zpoints.set_ydata(zy)
+            line0.set_xdata(xdat)
+            line.set_xdata(xdat)
+            line0.set_ydata(ydat0)
+            line.set_ydata(ydat)
+            point_curr.set_xdata([result.x])
+            point_curr.set_ydata([result.fun])
+            point_prev.set_xdata([result.x])
+            point_prev.set_ydata([result.fun])
+            ax1.relim()
+            ax1.autoscale_view()
+            ax2.relim()
+            ax2.autoscale_view()
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+            plt.pause(.0001)
 
     def _gen_nu_large_R(self, l):
         def fn_gen_nu_large_r(r, theta, phi):
@@ -176,7 +271,8 @@ class HamiltonianRoca:
                 return _J(l, d=1)(q(nu=nu) * R)
 
             def f2(nu):
-                return _g(l, d=1)(Q(r=r, nu=nu) * R)
+                Q0 = Q(r=r, nu=nu)
+                return _g(l, d=1)(Q0 * R)
 
             def f3(nu):
                 Q0 = Q(r=r, nu=nu)
@@ -186,110 +282,42 @@ class HamiltonianRoca:
                 )
 
             def fprod(nu):
-                return f1(nu) * f2(nu) * f3(nu)
+                c1 = f1(nu)
+                c2 = f2(nu)
+                c3 = f3(nu)
+                return c1 * c2 * c3
 
-            def ztr(z):
-                return abs(z)
+            xdat = np.linspace(self._nu_min(), self._nu_max(), self._nu_res())
+            ydat = np.array([fprod(x) for x in xdat])
 
-            # xdat = np.linspace(-10, 10, 101)
-            # ydat = np.linspace(-1e-6, 1e-6, 101)
-            # xdat, ydat = np.meshgrid(xdat, ydat)
+            xdat0 = xdat[~np.isnan(ydat)]
+            ydat0 = ydat[~np.isnan(ydat)]
 
-            # zdat = np.empty_like(xdat)
-            # for i, j in it.product(range(len(xdat)), repeat=2):
-            #     zdat[i, j] = ztr(f1(xdat[i, j] + 1j*ydat[i, j]))
-            # n = len(zdat)
-            # fig, ax = plt.subplots(1, 1)
-            # cs = ax.contourf(xdat, ydat, zdat, n)
-            # fig.colorbar(cs)
-            # plt.show()
-            #
-            # zdat = np.empty_like(xdat)
-            # for i, j in it.product(range(len(xdat)), repeat=2):
-            #     zdat[i, j] = ztr(f2(xdat[i, j] + 1j*ydat[i, j]))
-            # n = len(zdat)
-            # fig, ax = plt.subplots(1, 1)
-            # cs = ax.contourf(xdat, ydat, zdat, n)
-            # fig.colorbar(cs)
-            # plt.show()
-            #
-            # zdat = np.empty_like(xdat)
-            # for i, j in it.product(range(len(xdat)), repeat=2):
-            #     zdat[i, j] = ztr(f3(xdat[i, j] + 1j*ydat[i, j]))
-            # n = len(zdat)
-            # fig, ax = plt.subplots(1, 1)
-            # cs = ax.contourf(xdat, ydat, zdat, n)
-            # fig.colorbar(cs)
-            # plt.show()
+            tck = interp.make_interp_spline(x=xdat0, y=ydat0)
+            yspl = interp.splev(x=xdat, tck=tck)
+            roots = interp.sproot(tck=tck)
 
-            # zdat = np.empty_like(xdat)
-            # for i, j in it.product(range(len(xdat)), repeat=2):
-            #     zdat[i, j] = ztr(fprod(xdat[i, j] + 1j*ydat[i, j]))
-            # n = len(zdat)
-            # fig, ax = plt.subplots(1, 1)
-            # cs = ax.contourf(xdat, ydat, zdat, n)
-            # fig.colorbar(cs)
-            # plt.show()
-
-            xlen = 20000
-            xmin = 0
-            xmax = xlen
-            xpts = 1000001
-
-            xdat0 = np.linspace(xmin, xmax, xpts)
-            ydat0 = np.array([f1(x) * f2(x) * f3(x) for x in xdat0])
-
-            xdat = xdat0[~np.isnan(ydat0)]
-            ydat = ydat0[~np.isnan(ydat0)]
-
-            kdat = np.arange(xpts)[~np.isnan(ydat0)]
-            ykdat_cplx = ft.fft(ydat)
-            ykdat_real = np.real(ykdat_cplx)
-            ykdat_imag = np.imag(ykdat_cplx)
-
-            ykdat_real_fn = interp.interp1d(kdat, ykdat_real, kind='cubic')
-            ykdat_imag_fn = interp.interp1d(kdat, ykdat_imag, kind='cubic')
-
-            omegkdat = np.linspace(2*pi*kdat[0]/xlen, 2*pi*kdat[50]/xlen, xpts)
-            yomegdat_real = ykdat_real_fn(omegkdat*xlen/2/pi)
-            yomegdat_imag = ykdat_imag_fn(omegkdat*xlen/2/pi)
-
-            fig, ax = plt.subplots(2, 1)
-            ax[0].plot(xdat, ydat, '-', color='black')
-            ax[1].plot(omegkdat, yomegdat_real, '-', color='red')
-            ax[1].plot(omegkdat, yomegdat_imag, '-', color='blue')
-
-            xmaxr, ymaxr = max(zip(omegkdat, yomegdat_real),
-                               key=lambda x: abs(x[1]))
-            xmaxi, ymaxi = max(zip(omegkdat, yomegdat_imag),
-                               key=lambda x: abs(x[1]))
-
-            lammaxr = 2 * pi / xmaxr
-            lammaxi = 2 * pi / xmaxi
-            print(lammaxr)
-            print(lammaxi)
-            for i in it.count():
-                if lammaxi * i < xdat[-1]:
-                    ax[0].axvline(lammaxi * i, color='blue', alpha=.5, lw=.5)
-                if lammaxr * i < xdat[-1]:
-                    ax[0].axvline(lammaxr * i, color='red', alpha=.5, lw=.5)
-                if lammaxi*i > xdat[-1] and lammaxr*i > xdat[-1]:
-                    break
+            fig, ax = plt.subplots(1, 1)
+            ax.plot(xdat, ydat, '-', color='blue')
+            ax.plot(xdat, yspl, '-', color='orange')
+            ax.plot(roots, np.zeros_like(roots), '.', color='red')
             plt.show()
 
             omeg2 = self.omega2_TO(r=r) * (
                 (self.constants.epsilon_0 * l + self.epsilon_inf2 * (l + 1)) /
                 (self.epsilon_inf1 * l + self.epsilon_inf2 * (l + 1))
             )
-            yield R * np.sqrt(
+            nu_theor = R * np.sqrt(
                 (self.omega2_L0(r=r) - omeg2) / self._beta2_L(r=r)
             )
+            print('nu_th = {}'.format(nu_theor))
+            # yield nu_theor
 
-            # return map(lambda nu: nu.real, it.chain(
-            #     self._gen_nu_abstract(fun0=f1, jac0=None, ztr=ztr),
-            #     self._gen_nu_abstract(fun0=f2, jac0=None, ztr=ztr),
-            #     self._gen_nu_abstract(fun0=f3, jac0=None, ztr=ztr),
-            # ))
+            return map(lambda nu: nu.real, it.chain(
+                self._gen_nu_abstract(fun0=f1),
+                self._gen_nu_abstract(fun0=f2),
+                self._gen_nu_abstract(fun0=f3),
+            ))
         return fn_gen_nu_large_r
 
     def _gen_nu_full(self, l):
