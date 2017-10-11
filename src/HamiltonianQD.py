@@ -30,13 +30,14 @@ def _get_roots(rootfn, expected_roots):
     for x0 in expected_roots:
         result = opt.root(fun=fn, x0=np.array([x0.real, x0.imag]))
         if not result.success:
-            print('  FAIL: {}'.format(result.message))
+            print('>>  FAIL: {}'.format(result.message))
         else:
-            print('  SUCCESS: {}'.format(result.message))
-            print('  root : x={}'.format(result.x[0]))
+            # print('>>  SUCCESS: {}'.format(result.message))
+            print('>>  SUCCESS')
+            print('      root: x={}'.format(result.x[0]))
             roots.append(result.x[0])
     if len(roots) < len(expected_roots):
-        print('  ERR: Found {} of {} expected roots'
+        print('>>  ERR: Found {} of {} expected roots'
               ''.format(len(roots), len(expected_roots)))
     return sorted(roots)
 
@@ -59,7 +60,6 @@ def _plot_dispersion_function(xdat, rootfn, iterfn, ximag=False):
 
     ax.axhline(0., ls='--', lw=1., color='gray', alpha=.5)
     ax.axvline(0., ls='--', lw=1., color='gray', alpha=.5)
-    print(ydat)
     plt.show()
     return fig, ax
 
@@ -92,7 +92,7 @@ def _plot_dispersion_function2d(xdat, ydat, rootfn, iterfn):
     return fig, ax
 
 
-def _Y_lm(l, m):
+def _get_Y_lm(l, m):
     def yfn(theta, phi):
         return sp.sph_harm(m, l, phi, theta)
     return yfn
@@ -100,23 +100,26 @@ def _Y_lm(l, m):
 
 def _J(l, d=0):
     def fn_j(z):
+        z = complex(z)
         return sp.jvp(v=l, z=z, n=d)
     return fn_j
 
 
 def _spherical_bessel1(l, func, d=0):
-    def fn_spb(z):
+    def fn_spb(x):
         if d == 0:
-            return func(n=l, z=z, derivative=False)
+            return func(n=l, z=x, derivative=False)
         elif d == 1:
-            return func(n=l, z=z, derivative=True)
-        elif l == 0:
-            return -_spherical_bessel1(l=1, func=func, d=d - 1)(z)
+            return func(n=l, z=x, derivative=True)
         else:
-            return (
-                _spherical_bessel1(l=l-1, func=func, d=d - 1)(z) -
-                (l+1) / 2 * _spherical_bessel1(l=l, func=func, d=d - 1)(z)
-            )
+            raise RuntimeError  # TODO
+        # elif l == 0:
+        #     return -_spherical_bessel1(l=1, func=func, d=d-1)(x)
+        # else:
+        #     return (
+        #         _spherical_bessel1(l=l-1, func=func, d=d-1)(x) -
+        #         (l+1) / 2 * _spherical_bessel1(l=l, func=func, d=d-1)(x)
+        #     )
     return fn_spb
 
 
@@ -130,7 +133,8 @@ def _i(l, d=0):
 
 def _g(l, d=0):
     def fn_g(z):
-        if z**2 >= 0:
+        z = complex(z)
+        if (z**2).real >= 0:
             j = _j(l, d)(z)
             return j
         else:
@@ -167,10 +171,9 @@ class ModelSpaceEPI:
 class HamiltonianEPI:
     def __init__(self, r_0, omega_LO, l_max, n_max,
                  epsilon_0_qdot, epsilon_inf_qdot,
-                 epsilon_inf_env,
-                 constants, beta_T, beta_L,
+                 epsilon_inf_env, constants, beta_T, beta_L,
                  large_R_approximation=True,
-                 expected_mu_dict=None):
+                 expected_mu_dict=None, known_mu_dict=None):
         self.ms = ModelSpaceEPI(nmax=n_max, nfock=2)
         self.r_0 = r_0
         self.V = 4/3 * pi * self.r_0**3
@@ -179,22 +182,29 @@ class HamiltonianEPI:
         self.const = constants
         self.eps_a_0 = epsilon_0_qdot
         self.eps_a_inf = epsilon_inf_qdot
-        self.eps_b_inf = epsilon_inf_env
-        self.beta_L = beta_L
-        self.beta_T = beta_T
-        self.omega_L = omega_LO
-        self.omega_T = self.omega_L * np.sqrt(self.eps_a_inf / self.eps_a_0)
-        self.gamma_0 = ((self.omega_L**2 - self.omega_T**2) *
-                        (self.r_0 / self.beta_T)**2)
+        self._eps_div = epsilon_inf_env / self.eps_a_inf
+        self.beta_L2 = beta_L**2
+        self.beta_T2 = beta_T**2
+        self._beta_div2 = self.beta_L2 / self.beta_T2
+        self._omega_L = omega_LO
+        self.omega_L2 = self._omega_L**2
+        self.omega_T2 = self.omega_L2 * self.eps_a_inf / self.eps_a_0
+        # NOTE: The following definition for gamma is different from gamma_0
+        # of Riera
+        self.gamma = (self.omega_L2 - self.omega_T2) / self.beta_T2
         self.C_F = -np.sqrt(
-            2*pi * self.const.e**2 * self.const.hbar * self.omega_L / self.V *
+            2*pi * self.const.e**2 * self.const.hbar * self._omega_L / self.V *
             (1/self.eps_a_inf - 1/self.eps_a_0)
         )
         self._expected_roots_mu = dict()
         self._roots_mu = dict()
 
+        if known_mu_dict is not None:
+            self._roots_mu.update(known_mu_dict)
         if expected_mu_dict is not None:
             self._expected_roots_mu.update(expected_mu_dict)
+
+        self._fill_roots_mu()
 
     def H_epi(self, r, theta, phi):
         """Electron-phonon interaction Hamiltonian at spherical coordinates
@@ -204,8 +214,8 @@ class HamiltonianEPI:
         for l, m, n in self.iter_lmn():
             h += (
                 self.r_0 * self.C_F * np.sqrt(4*pi/3) *
-                self.Phi_ln(l=l, n=n)(r=r) *
-                _Y_lm(l=l, m=m)(theta=theta, phi=phi) *
+                self._get_Phi_ln(l=l, n=n)(r=r) *
+                _get_Y_lm(l=l, m=m)(theta=theta, phi=phi) *
                 (self._b(l=l, m=m, n=n) + self._b(l=l, m=m, n=n).dag())
             )
         return
@@ -223,7 +233,7 @@ class HamiltonianEPI:
         for n in range(self.n_max + 1):
             mu = self.mu_nl(n=n, l=l)
             if mu is None:
-                break
+                break  # TODO: Anything else?
             else:
                 yield mu
 
@@ -235,15 +245,16 @@ class HamiltonianEPI:
         for mu, n in self.iter_mu_n(l):
             yield self.omega(mu=mu), n
 
+    # TODO continue search for errors
     def omega(self, mu):
         return np.sqrt(
-            complex(self.omega_L**2 - self.beta_L**2 * self.q(mu=mu)**2)
+            complex(self.omega_L2 - self.beta_L2 * self.q(mu=mu)**2)
         )
 
-    def Phi_ln(self, l, n):
-        fact = np.sqrt(self.r_0) / self.norm_u(n=n, l=l)
+    def _get_Phi_ln(self, l, n):
+        fact = np.sqrt(self.r_0) / self._norm_u(n=n, l=l)
         mu_n = self.mu_nl(n=n, l=l)
-        ediv = self.eps_b_inf / self.eps_a_inf
+        ediv = self._eps_div
 
         def phifn(r):
             r0 = self.r_0
@@ -273,7 +284,7 @@ class HamiltonianEPI:
             self._roots_mu[l] = sorted(roots)
             return self.mu_nl(n=n, l=l)
         elif n >= len(self._roots_mu[l]):
-            print('No root found for l={} and n={}'.format(l, n))
+            print('>> No root found for l={} and n={}'.format(l, n))
             return None  # TODO
         else:
             return self._roots_mu[l][n]
@@ -286,11 +297,19 @@ class HamiltonianEPI:
 
     def _get_root_function_mu(self, l):
         def rootfn(mu):
+            if mu < 0:
+                print('hi')
             nu = self.nu(mu=mu)
-            return (
-                nu * _j(l, d=1)(mu) * self._F_l(l=l)(nu=nu) -
-                l * (l + 1) * _j(l)(mu) * self._G_l(l=l)(nu=nu)
+            dj_mu = _j(l, d=1)(mu)
+            fl_nu = self._F_l(l=l)(nu=nu)
+            jl_mu = _j(l)(mu)
+            gl_nu = self._G_l(l=l)(nu=nu)
+            ans = (
+                nu * dj_mu * fl_nu -
+                l * (l + 1) * jl_mu * gl_nu
             )
+            assert not np.isnan(ans)
+            return ans
         return rootfn
 
     def plot_root_function_mu(self, l, xdat, ximag=False, cplx=False):
@@ -305,12 +324,26 @@ class HamiltonianEPI:
                 iterfn=self.iter_mu(l=l)
             )
 
-    def nu(self, mu):
-        return self.Q(mu=mu) / self.q(mu=mu) * mu
+    def nu(self, Q=None, mu=None):
+        if Q is not None:
+            return Q * self.r_0
+        elif mu is not None:
+            return self.nu(Q=self.Q(mu=mu))
+        else:
+            raise RuntimeError  # TODO
 
-    def Q(self, mu):
-        Q2 = self.q(mu=mu)**2 * self.beta_L**2 / self.beta_T**2 - self.gamma_0
-        return np.sqrt(complex(Q2))
+    def Q(self, omega2=None, omega=None, mu=None):
+        return np.sqrt(complex(self._Q2(omega2=omega2, omega=omega, mu=mu)))
+
+    def _Q2(self, omega2=None, omega=None, mu=None):
+        if omega2 is not None:
+            return (self.omega_T2 - omega2) / self.beta_T2
+        elif omega is not None:
+            return self._Q2(omega2=omega**2)
+        elif mu is not None:
+            return self._Q2(omega=self.omega(mu=mu))
+        else:
+            raise RuntimeError  # TODO
 
     def q(self, mu):
         return mu / self.r_0
@@ -318,9 +351,9 @@ class HamiltonianEPI:
     def _F_l(self, l):
         def ffn(nu):
             return (
-                self.gamma_0 / nu**2 * l *
+                self.gamma * (self.r_0/nu)**2 * l *
                 (nu * _g(l, d=1)(nu) - l * _g(l)(nu)) +
-                (l + (l + 1) * self.eps_b_inf / self.eps_a_inf) *
+                (l + (l + 1) * self._eps_div) *
                 (nu * _g(l, d=1)(nu) - _g(l)(nu))
             )
         return ffn
@@ -328,22 +361,22 @@ class HamiltonianEPI:
     def _G_l(self, l):
         def gfn(nu):
             return (
-                self.gamma_0 / nu**2 * self.eps_b_inf / self.eps_a_inf *
+                self.gamma * (self.r_0/nu)**2 * self._eps_div *
                 -(nu * _g(l, d=1)(nu) - l * _g(l)(nu)) +
-                (l + (l + 1) * self.eps_b_inf / self.eps_a_inf) * _g(l)(nu)
+                (l + (l + 1) * self._eps_div) * _g(l)(nu)
             )
         return gfn
 
-    def norm_u(self, n, l):
-        return np.sqrt(self.norm_u2(n=n, l=l))
+    def _norm_u(self, n, l):
+        return np.sqrt(self._norm_u2(n=n, l=l))
 
-    def norm_u2(self, n, l):
+    def _norm_u2(self, n, l):
         mu = self.mu_nl(n=n, l=l)
         r0 = self.r_0
         mu0 = mu/r0
         nu0 = self.nu(mu=mu)/r0
-        pl = self.p_l(l=l, mu=mu)
-        tl = self.t_l(l=l, mu=mu)
+        pl = self._p_l(l=l, mu=mu)
+        tl = self._t_l(l=l, mu=mu)
 
         def ifn(r):
             return r**2 * (
@@ -361,7 +394,7 @@ class HamiltonianEPI:
             )
         return integ.quad(func=ifn, a=0, b=self.r_0)[0]
 
-    def p_l(self, l, mu, k=0):
+    def _p_l(self, l, mu, k=0):
         nu = self.nu(mu=mu)
         # muk = self.mu_nl(n=k, l=l)
         muk = mu
@@ -370,12 +403,24 @@ class HamiltonianEPI:
             (l * _g(l)(nu) - nu * _g(l, d=1)(nu))
         )
 
-    def t_l(self, l, mu, k=0):
+    def _t_l(self, l, mu, k=0):
         # muk = self.mu_nl(n=k, l=l)
         muk = mu
-        ediv = self.eps_b_inf/self.eps_a_inf
+        ediv = self._eps_div
         return (
-            self.gamma_0 / self.nu(mu=muk)**2 *
+            self.gamma * (self.r_0/self.nu(mu=muk))**2 *
             (muk * _j(l, d=1)(mu) + (l+1)*ediv*_j(l)(mu)) /
             (l + ediv*(l+1))
         )
+
+    def _fill_roots_mu(self):
+        for l in range(self.l_max + 1):
+            new_roots = _get_roots(
+                rootfn=self._get_root_function_mu(l=l),
+                expected_roots=self._get_expected_roots_mu(l=l)
+            )
+            if l in self._roots_mu:
+                old_roots = filter(lambda r: r not in new_roots,
+                                   self._roots_mu[l])
+                new_roots = sorted(new_roots + list(old_roots))
+            self._roots_mu[l] = new_roots
