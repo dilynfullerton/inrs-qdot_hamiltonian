@@ -41,12 +41,17 @@ def _get_roots(rootfn, expected_roots):
     return sorted(roots)
 
 
-def _plot_dispersion_function(xdat, rootfn, iterfn):
+def _plot_dispersion_function(xdat, rootfn, iterfn, ximag=False):
     fig, ax = plt.subplots(1, 1)
 
     xdat = np.array(xdat)
+    if ximag:
+        xdat = np.imag(xdat)
+    else:
+        xdat = np.real(xdat)
+
     ydat = np.array([rootfn(x) for x in xdat])
-    ax.plot(xdat, ydat, '-', color='red')
+    ax.plot(xdat, np.real(ydat), '-', color='red')
 
     zxdat = np.array(list(iterfn))
     zydat = np.zeros_like(zxdat)
@@ -54,6 +59,7 @@ def _plot_dispersion_function(xdat, rootfn, iterfn):
 
     ax.axhline(0., ls='--', lw=1., color='gray', alpha=.5)
     ax.axvline(0., ls='--', lw=1., color='gray', alpha=.5)
+    print(ydat)
     plt.show()
     return fig, ax
 
@@ -287,11 +293,11 @@ class HamiltonianEPI:
             )
         return rootfn
 
-    def plot_root_function_mu(self, l, xdat, cplx=False):
+    def plot_root_function_mu(self, l, xdat, ximag=False, cplx=False):
         if not cplx:
             return _plot_dispersion_function(
                 xdat=xdat, rootfn=self._get_root_function_mu(l=l),
-                iterfn=self.iter_mu(l=l)
+                iterfn=self.iter_mu(l=l), ximag=ximag
             )
         else:
             return _plot_dispersion_function2d(

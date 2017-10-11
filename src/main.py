@@ -7,7 +7,8 @@ from matplotlib import pyplot as plt
 
 ModelConstants = namedtuple('ModelConstants', ['epsilon_0', 'e', 'hbar'])
 
-R0 = 1
+R0 = 1e-7
+R1 = 6e-7
 OMEGA_LO = 305
 OMEGA_TO = 238
 EPS_INF_QD = 5.3
@@ -17,11 +18,9 @@ BETA_L = 5.04e3
 BETA_T = 1.58e3
 EXP_MU = {
     0: [
-        # .01,
-        1.4, 2.4, 3.4, 4.375, 4.5],
+        .01, 1.4, 2.4, 3.4, 4.375, 4.5],
     1: [
-        # .01,
-        1.6, 2.2, 2.8, 3.9]
+        .01, 1.6, 2.2, 2.8, 3.9],
 }
 LMAX = 1
 NMAX = 3
@@ -41,14 +40,14 @@ ham = HamiltonianEPI(
     large_R_approximation=True,
 )
 
-XDAT = np.linspace(-5, 5, 100)
-ham.plot_root_function_mu(l=0, xdat=XDAT, cplx=True)
-ham.plot_root_function_mu(l=1, xdat=XDAT, cplx=True)
+XDAT = np.linspace(-5, 5, 1000)
+ham.plot_root_function_mu(l=0, xdat=XDAT)
+ham.plot_root_function_mu(l=1, xdat=XDAT)
 
 expect_mu = dict(EXP_MU)
-rdat = np.linspace(1, 6, 101)
-wdats_l0 = [np.empty_like(rdat) for i in range(NMAX + 1)]
-wdats_l1 = [np.empty_like(rdat) for i in range(NMAX + 1)]
+rdat = np.linspace(R0, R1, 101)
+wdats_l0 = [np.empty(shape=rdat.shape, dtype=complex) for i in range(NMAX + 1)]
+wdats_l1 = [np.empty(shape=rdat.shape, dtype=complex) for i in range(NMAX + 1)]
 for R, i in zip(rdat, it.count()):
     print('R = {:8.4e}'.format(R))
     ham = HamiltonianEPI(
@@ -67,9 +66,9 @@ for R, i in zip(rdat, it.count()):
     )
     print()
     for omega_n, n in ham.iter_omega_n(l=0):
-        wdats_l0[n][i] = omega_n.real
+        wdats_l0[n][i] = omega_n
     for omega_n, n in ham.iter_omega_n(l=1):
-        wdats_l1[n][i] = omega_n.real
+        wdats_l1[n][i] = omega_n
     expect_mu = {
         0: [nu for nu, n in ham.iter_mu_n(l=0)],
         1: [nu for nu, n in ham.iter_mu_n(l=1)],
@@ -79,12 +78,14 @@ print('Making plots...')
 
 fig, axes = plt.subplots(2, 1)
 for wdat, mode in zip(wdats_l0, it.count()):
-    axes[0].plot(rdat, wdat, '-', label='n={}'.format(mode))
+    axes[0].plot(rdat, wdat.real, '-', label='n={}, Re'.format(mode))
+    axes[0].plot(rdat, wdat.imag, '-.', label='n={}, Im'.format(mode))
 axes[0].set_ylabel('l = 0')
 axes[0].legend()
 
 for wdat, mode in zip(wdats_l1, it.count()):
-    axes[1].plot(rdat, wdat, '-', label='n={}'.format(mode))
+    axes[1].plot(rdat, wdat.real, '-', label='n={}, Re'.format(mode))
+    axes[1].plot(rdat, wdat.imag, '-.', label='n={}, Im'.format(mode))
 axes[1].set_ylabel('l = 1')
 axes[0].legend()
 
