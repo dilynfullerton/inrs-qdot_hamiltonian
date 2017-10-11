@@ -112,6 +112,12 @@ class HamiltonianRoca:
             hi += h_l * h_li
         return h
 
+    def eigenfrequencies(self, l, r):
+        nulist = self._gen_nu(l=l)(r=r)
+        # TODO: should probably not have to cast to real
+        omeglist = [abs(self.omega(r=r, nu=nu)) for nu in nulist]
+        return sorted(omeglist)
+
     def _gen_nu(self, l):
         if self._large_R_approximation:
             return self._gen_nu_large_R(l)
@@ -153,34 +159,7 @@ class HamiltonianRoca:
                 c3 = f3(nu)
                 return c1 * c2 * c3
 
-            xdat = np.linspace(
-                self._nu_min(r=r), self._nu_max(r=r), self._nu_res())
-            ydat = np.array([fprod(x) for x in xdat])
-
-            xdat0 = xdat[~np.isnan(ydat)]
-            ydat0 = ydat[~np.isnan(ydat)]
-
-            tck = interp.make_interp_spline(x=xdat0, y=ydat0)
-            yspl = interp.splev(x=xdat, tck=tck)
-            roots = interp.sproot(tck=tck)
-
-            fig, ax = plt.subplots(1, 1)
-            ax.plot(xdat, ydat, '-', color='blue')
-            ax.plot(xdat, yspl, '-', color='orange')
-            ax.plot(roots, np.zeros_like(roots), '.', color='red')
-            plt.show()
-
-            omeg2 = self.omega2_TO(r=r) * (
-                (self.constants.epsilon_0 * l + self.epsilon_inf2 * (l + 1)) /
-                (self.epsilon_inf1 * l + self.epsilon_inf2 * (l + 1))
-            )
-            nu_theor = R * np.sqrt(
-                (self.omega2_LO(r=r) - omeg2) / self._beta2_L(r=r)
-            )
-            print('nu_th = {}'.format(nu_theor))
-            print('nu_num = {}'.format(roots))
-
-            return iter(roots)
+            return 0  # TODO
         return fn_gen_nu_large_r
 
     def _gen_nu_full(self, l):
