@@ -4,24 +4,31 @@ interaction of the phonon modes of a quantum dot with an electromagnetic
 field.
 
 The definitions used in the theoretical model are based on
-Sec. III of "Polar optical vibrations in quantum dots" by Roca et. al.
+
+Electron Raman Scattering in Nanostructures
+R. Betancourt-Riera, R. Riera, J. L. Marín
+Centro de Investigación en Física, Universidad de Sonora, 83190 Hermosillo, Sonora, México
+R. Rosas
+Departamento de Física, Universidad de Sonora, 83000 Hermosillo, Sonora, México
 """
 from math import pi
 import qutip as qt
-import itertools as it
 import numpy as np
 from scipy import optimize as opt
 from scipy import special as sp
 from scipy import integrate as integ
 from matplotlib import pyplot as plt
+from matplotlib import mlab
+import itertools as it
 
 
 def _get_roots(rootfn, expected_roots):
     def fn(x):
-        return rootfn(x[0])
+        ans = rootfn(x[0] + 1j*x[1])
+        return np.array([ans.real, ans.imag])
     roots = []
     for x0 in expected_roots:
-        result = opt.root(fun=fn, x0=x0)
+        result = opt.root(fun=fn, x0=np.array([x0.real, x0.imag]))
         if not result.success:
             print('  FAIL: {}'.format(result.message))
         else:
@@ -38,10 +45,10 @@ def _plot_dispersion_function(xdat, rootfn, iterfn):
     fig, ax = plt.subplots(1, 1)
 
     xdat = np.array(xdat)
-    ydat = np.array([rootfn(nu=nu) for nu in xdat])
+    ydat = np.array([rootfn(x) for x in xdat])
     ax.plot(xdat, ydat, '-', color='red')
 
-    zxdat = np.array(iterfn)
+    zxdat = np.array(list(iterfn))
     zydat = np.zeros_like(zxdat)
     ax.plot(zxdat, zydat, 'o', color='green')
 
@@ -51,25 +58,38 @@ def _plot_dispersion_function(xdat, rootfn, iterfn):
     return fig, ax
 
 
-# Integrating over angles
-def _Y(l, m):
-    def fn_y(theta, phi):
+def _plot_dispersion_function2d(xdat, ydat, rootfn, iterfn):
+    fig, ax = plt.subplots(1, 1)
+
+    xdat = np.array(xdat)
+    ydat = np.array(ydat)
+    xdat, ydat = np.meshgrid(xdat, ydat)
+
+    zdat = np.empty_like(xdat)
+    for i in range(zdat.shape[0]):
+        for j in range(zdat.shape[1]):
+            zdat[i, j] = abs(rootfn(xdat[i, j] + 1j * ydat[i, j]))
+
+    plt.contourf(xdat, ydat, zdat, len(zdat), alpha=.5)
+
+    # Plot zero contours
+    cgraph = ax.contour(xdat, ydat, zdat)
+    ax.clabel(cgraph, inline=1, fontsize=10)
+
+    # Plot zeros
+    zeros = np.array(list(iterfn))
+    zxdat = np.real(zeros)
+    zydat = np.imag(zeros)
+    ax.plot(zxdat, zydat, 'o', color='green')
+    plt.show()
+
+    return fig, ax
+
+
+def _Y_lm(l, m):
+    def yfn(theta, phi):
         return sp.sph_harm(m, l, phi, theta)
-
-    def intfn(theta, phi):
-        return np.sin(theta) * fn_y(theta, phi)
-
-    def ifnr(theta, phi):
-        return np.real(intfn(theta, phi))
-    re = integ.dblquad(func=ifnr, a=0, b=2*np.pi,
-                       gfun=lambda x: 0, hfun=lambda x: np.pi)[0]
-
-    def ifni(theta, phi):
-        return np.imag(intfn(theta, phi))
-    im = integ.dblquad(func=ifni, a=0, b=2*np.pi,
-                       gfun=lambda x: 0, hfun=lambda x: np.pi)[0]
-
-    return re + 1j * im
+    return yfn
 
 
 def _J(l, d=0):
@@ -113,7 +133,7 @@ def _g(l, d=0):
     return fn_g
 
 
-class ModelSpaceRoca:
+class ModelSpaceEPI:
     def __init__(self, nmax, nfock=2):
         self.nmax = nmax
         self.dim = 2 * self.nmax + 1
@@ -138,195 +158,218 @@ class ModelSpaceRoca:
         return qt.tensor(ops)
 
 
-class HamiltonianRoca:
-    def __init__(self, R, omega_TO, l_max, n_max, epsilon_inf_qdot,
-                 epsilon_inf_env, constants, beta_T, beta_L,
-                 large_R_approximation=True, expected_nu_dict=None):
-        self.ms = ModelSpaceRoca(nmax=n_max, nfock=2)
-        self.R = R
-        self.V_0 = 4/3 * pi * R**3
+class HamiltonianEPI:
+    def __init__(self, r_0, omega_LO, l_max, n_max,
+                 epsilon_0_qdot, epsilon_inf_qdot,
+                 epsilon_inf_env,
+                 constants, beta_T, beta_L,
+                 large_R_approximation=True,
+                 expected_mu_dict=None):
+        self.ms = ModelSpaceEPI(nmax=n_max, nfock=2)
+        self.r_0 = r_0
+        self.V = 4/3 * pi * self.r_0**3
         self.l_max = l_max
         self.n_max = n_max
-        self.epsilon_inf1 = epsilon_inf_qdot
-        self.epsilon_inf2 = epsilon_inf_env
-        self.constants = constants
-        self._large_R_approximation = large_R_approximation
-        self._epsdiv = self.epsilon_inf2 / self.epsilon_inf1
-        self.beta_T = beta_T
-        self.beta2_T = self.beta_T**2
+        self.const = constants
+        self.eps_a_0 = epsilon_0_qdot
+        self.eps_a_inf = epsilon_inf_qdot
+        self.eps_b_inf = epsilon_inf_env
         self.beta_L = beta_L
-        self.beta2_L = self.beta_L**2
+        self.beta_T = beta_T
+        self.omega_L = omega_LO
+        self.omega_T = self.omega_L * np.sqrt(self.eps_a_inf / self.eps_a_0)
+        self.gamma_0 = ((self.omega_L**2 - self.omega_T**2) *
+                        (self.r_0 / self.beta_T)**2)
+        self.C_F = -np.sqrt(
+            2*pi * self.const.e**2 * self.const.hbar * self.omega_L / self.V *
+            (1/self.eps_a_inf - 1/self.eps_a_0)
+        )
+        self._expected_roots_mu = dict()
+        self._roots_mu = dict()
 
-        # Frequencies of QD
-        self.omega_TO = omega_TO
-        self.omega2_TO = self.omega_TO**2
-        self.omega2_LO = (self.omega2_TO * self.constants.epsilon_0 /
-                          self.epsilon_inf1)
-        self.omega_LO = np.sqrt(self.omega2_LO)
+        if expected_mu_dict is not None:
+            self._expected_roots_mu.update(expected_mu_dict)
 
-        self._nu_n_dict = dict()  # l -> [nu_0, nu_1, ..., nu_n]
-        self._expected_nu_n_dict = dict()
-
-        if expected_nu_dict is not None:
-            for l, nulist in expected_nu_dict.items():
-                self._expected_nu_n_dict[l] = sorted(list(nulist))
-
-    # Making the assumption that spatial coordinates can be integrated over
-    def h(self):
+    def H_epi(self, r, theta, phi):
         """Electron-phonon interaction Hamiltonian at spherical coordinates
-        (r, theta, phi). The definition is based on (Roca, Eq. 42).
+        (r, theta, phi). The definition is based on (Riera, Eq. 59).
         """
-        h = self._C_F() * self.R * np.sqrt(2*pi)
-        hi = 0
+        h = 0
+        for l, m, n in self.iter_lmn():
+            h += (
+                self.r_0 * self.C_F * np.sqrt(4*pi/3) *
+                self.Phi_ln(l=l, n=n)(r=r) *
+                _Y_lm(l=l, m=m)(theta=theta, phi=phi) *
+                (self._b(l=l, m=m, n=n) + self._b(l=l, m=m, n=n).dag())
+            )
+        return
+
+    def _b(self, l, m, n):
+        return qt.qeye(2)  # TODO
+
+    def iter_lmn(self):
         for l in range(self.l_max+1):
-            h_l = (2*l + 1) * 1j**l
-            h_li = 0
             for m in range(-l, l+1):
-                h_m = _Y(l, m)
-                h_mi = 0
-                for nu_nl, n in zip(self._iter_nu_n(l=l), range(self.n_max+1)):
-                    h_mi += (
-                        1 / nu_nl * self._Phibar(nu_nl, l) *
-                        (self._b(n) + self._b(-n).dag())
-                    )
-                h_li += h_m * h_mi
-            hi += h_l * h_li
-        h *= hi
-        return h + h.dag()
+                for mu_n, n in zip(self.iter_mu(l), range(self.n_max+1)):
+                    yield l, m, n
 
-    def eigenfrequencies(self, l):
-        nulist = self._iter_nu_n(l=l)
-        omeglist = [self.omega(nu=nu) for nu in nulist]
-        return sorted(omeglist)
+    def iter_mu(self, l):
+        for n in range(self.n_max + 1):
+            mu = self.mu_nl(n=n, l=l)
+            if mu is None:
+                break
+            else:
+                yield mu
 
-    def _iter_nu_n(self, l):
-        if l not in self._expected_nu_n_dict:
-            return []
-        elif l in self._nu_n_dict:
-            return self._nu_n_dict[l]
-        elif self._large_R_approximation:
-            rootfn = self._root_function_nu_large_R(l=l)
-        else:
-            rootfn = self._root_function_nu_full(l=l)
-        roots = _get_roots(
-            rootfn=rootfn, expected_roots=self._expected_nu_n_dict[l])
-        self._nu_n_dict[l] = sorted(roots)
-        return roots
+    def iter_mu_n(self, l):
+        for mu, n in zip(self.iter_mu(l=l), range(self.n_max+1)):
+            yield mu, n
 
-    def plot_dispersion_nu(self, l, xdat):
-        if self._large_R_approximation:
-            return _plot_dispersion_function(
-                xdat=xdat, rootfn=self._root_function_nu_large_R(l=l),
-                iterfn=self._iter_nu_n(l=l)
-            )
-        else:
-            return _plot_dispersion_function(
-                xdat=xdat, rootfn=self._root_function_nu_large_R(l=l),
-                iterfn=self._iter_nu_n(l=l)
-            )
+    def iter_omega_n(self, l):
+        for mu, n in self.iter_mu_n(l):
+            yield self.omega(mu=mu), n
 
-    def _root_function_nu_large_R(self, l):
-        def rootfn(nu):
-            Q0 = self._Q(nu=nu)
-
-            c1 = _J(l, d=1)(self._q(nu=nu) * self.R)
-            c2 = _g(l, d=1)(Q0 * self.R)
-            c3 = (
-                (self.omega2_LO - self.omega2(nu=nu)) /
-                self.beta2_T * l / Q0 + Q0 * self._lbar2(l)
-            )
-            return c1 * c2 * c3
-        return rootfn
-
-    def _root_function_nu_full(self, l):
-        def rootfn(nu):
-            return 0  # TODO
-
-        return rootfn
-
-    def _lbar2(self, l):
-        return l + (l + 1) * self._epsdiv
-
-    def _gamma_0(self, dnu=0):
-        if dnu > 0:
-            return 0
-        else:
-            return (self.omega2_LO - self.omega2_TO) / self.beta2_T
-
-    def _nu(self, omega2):
-        return self.R * np.sqrt(
-            (self.omega2_LO - omega2) / self.beta2_L
+    def omega(self, mu):
+        return np.sqrt(
+            complex(self.omega_L**2 - self.beta_L**2 * self.q(mu=mu)**2)
         )
 
-    def _mu(self, nu, dnu=0):
-        return self._Q(nu=nu, dnu=dnu) * self.R
+    def Phi_ln(self, l, n):
+        fact = np.sqrt(self.r_0) / self.norm_u(n=n, l=l)
+        mu_n = self.mu_nl(n=n, l=l)
+        ediv = self.eps_b_inf / self.eps_a_inf
 
-    def _Q(self, nu, dnu=0):
-        bfrac = self.beta2_L / self.beta2_T
-        q = self._q(nu=nu, dnu=dnu)
-        gam = self._gamma_0(dnu=dnu)
-        ans = bfrac * q - gam
-        print(q)
-        assert ans >= 0
-        return ans
-
-    def _q(self, nu, dnu=0):
-        if dnu == 0:
-            return nu / self.R
-        elif dnu == 1:
-            return 1 / self.R
-        else:
-            return 0
-
-    def omega(self, nu, dnu=0):
-        if dnu == 0:
-            return np.sqrt(self.omega2(nu=nu))
-        elif dnu == 1:
-            return self.omega2(nu=nu, dnu=1) / 2 / self.omega(nu=nu)
-        else:
-            print('Why am I here?')  # TODO define this behavior
-            raise RuntimeError
-
-    def omega2(self, nu, dnu=0):
-        if dnu == 0:
-            om2 = self.omega2_LO - self.beta2_L * (nu / self.R)**2
-            if not om2 >= 0:
-                print('omega2_LO = {}'.format(self.omega2_LO))
-                print('beta2_L = {}'.format(self.beta2_L))
-                print('nu = {}'.format(nu))
-                print('R = {}'.format(self.R))
-                print('omega2 = {}'.format(om2))
-            assert om2 >= 0
-        elif dnu == 1:
-            om2 = -2 * self.beta2_L * nu / self.R**2
-        elif dnu == 2:
-            om2 = -2 * self.beta2_L / self.R**2
-        else:
-            om2 = 0
-        return om2
-
-    def _C_F(self):
-        e = self.constants.e
-        h = self.constants.h
-        eps0 = self.constants.epsilon_0
-        return (
-            e * np.sqrt(h / self.V_0 * self.omega_LO) *
-            np.sqrt(1 / self.epsilon_inf1 - 1/eps0)
-        )
-
-    def _Phibar(self, nu, l):
-        def _fn_phibar(r):
-            rr = r / self.R
-            if r <= self.R:
-                return (
-                    (nu * _j(l, d=1)(nu) + (l + 1) * self._epsdiv * _j(l)(nu)) *
-                    rr**l - self._lbar2(l) * _j(l, d=1)(nu * rr)
+        def phifn(r):
+            r0 = self.r_0
+            if r <= r0:
+                return fact * (
+                    _j(l)(mu_n*r/r0) -
+                    (mu_n * _j(l, d=1)(mu_n) + (l+1) * ediv * _j(l)(mu_n)) /
+                    (l + (l + 1) * ediv) * (r/r0)**l
                 )
             else:
-                return (
-                    (nu * _j(l, d=1)(nu) - l * _j(l)(nu)) * rr**(-l-1)
+                return fact * (
+                    -(mu_n * _j(l, d=1)(mu_n) + l * ediv * _j(l)(mu_n)) /
+                    (l + (l + 1) * ediv) * (r/r0)**l
                 )
-        return integ.quad(func=_fn_phibar, a=0, b=self.R)[0]
+        return phifn
 
-    def _b(self, n):
-        return self.ms.b(n=n)
+    def mu_nl(self, n, l):
+        if l not in self._expected_roots_mu:
+            return None
+        elif n > self.n_max:
+            return None
+        elif l not in self._roots_mu or len(self._roots_mu[l]) == 0:
+            roots = _get_roots(
+                rootfn=self._get_root_function_mu(l=l),
+                expected_roots=self._get_expected_roots_mu(l=l)
+            )
+            self._roots_mu[l] = sorted(roots)
+            return self.mu_nl(n=n, l=l)
+        elif n >= len(self._roots_mu[l]):
+            print('No root found for l={} and n={}'.format(l, n))
+            return None  # TODO
+        else:
+            return self._roots_mu[l][n]
+
+    def _get_expected_roots_mu(self, l):
+        if l in self._expected_roots_mu:
+            return sorted(self._expected_roots_mu[l])
+        else:
+            return []
+
+    def _get_root_function_mu(self, l):
+        def rootfn(mu):
+            nu = self.nu(mu=mu)
+            return (
+                nu * _j(l, d=1)(mu) * self._F_l(l=l)(nu=nu) -
+                l * (l + 1) * _j(l)(mu) * self._G_l(l=l)(nu=nu)
+            )
+        return rootfn
+
+    def plot_root_function_mu(self, l, xdat, cplx=False):
+        if not cplx:
+            return _plot_dispersion_function(
+                xdat=xdat, rootfn=self._get_root_function_mu(l=l),
+                iterfn=self.iter_mu(l=l)
+            )
+        else:
+            return _plot_dispersion_function2d(
+                xdat=xdat, ydat=xdat, rootfn=self._get_root_function_mu(l=l),
+                iterfn=self.iter_mu(l=l)
+            )
+
+    def nu(self, mu):
+        return self.Q(mu=mu) / self.q(mu=mu) * mu
+
+    def Q(self, mu):
+        Q2 = self.q(mu=mu)**2 * self.beta_L**2 / self.beta_T**2 - self.gamma_0
+        return np.sqrt(complex(Q2))
+
+    def q(self, mu):
+        return mu / self.r_0
+
+    def _F_l(self, l):
+        def ffn(nu):
+            return (
+                self.gamma_0 / nu**2 * l *
+                (nu * _g(l, d=1)(nu) - l * _g(l)(nu)) +
+                (l + (l + 1) * self.eps_b_inf / self.eps_a_inf) *
+                (nu * _g(l, d=1)(nu) - _g(l)(nu))
+            )
+        return ffn
+
+    def _G_l(self, l):
+        def gfn(nu):
+            return (
+                self.gamma_0 / nu**2 * self.eps_b_inf / self.eps_a_inf *
+                -(nu * _g(l, d=1)(nu) - l * _g(l)(nu)) +
+                (l + (l + 1) * self.eps_b_inf / self.eps_a_inf) * _g(l)(nu)
+            )
+        return gfn
+
+    def norm_u(self, n, l):
+        return np.sqrt(self.norm_u2(n=n, l=l))
+
+    def norm_u2(self, n, l):
+        mu = self.mu_nl(n=n, l=l)
+        r0 = self.r_0
+        mu0 = mu/r0
+        nu0 = self.nu(mu=mu)/r0
+        pl = self.p_l(l=l, mu=mu)
+        tl = self.t_l(l=l, mu=mu)
+
+        def ifn(r):
+            return r**2 * (
+                (
+                    -mu0 * _j(l, d=1)(mu0*r) +
+                    l*(l+1)/r * pl * _g(l)(nu0*r) -
+                    tl * l/r0 * (r/r0)**(l-1)
+                )**2 +
+                l * (l + 1) / r**2 *
+                (
+                    -_j(l)(mu0*r) + pl/l *
+                    (_g(l)(nu0*r) + nu0*r * _g(l, d=1)(nu0*r)) -
+                    tl * (r/r0)**l
+                )**2
+            )
+        return integ.quad(func=ifn, a=0, b=self.r_0)[0]
+
+    def p_l(self, l, mu, k=0):
+        nu = self.nu(mu=mu)
+        # muk = self.mu_nl(n=k, l=l)
+        muk = mu
+        return (
+            (muk * _j(l, d=1)(mu) - l * _j(l)(mu)) /
+            (l * _g(l)(nu) - nu * _g(l, d=1)(nu))
+        )
+
+    def t_l(self, l, mu, k=0):
+        # muk = self.mu_nl(n=k, l=l)
+        muk = mu
+        ediv = self.eps_b_inf/self.eps_a_inf
+        return (
+            self.gamma_0 / self.nu(mu=muk)**2 *
+            (muk * _j(l, d=1)(mu) + (l+1)*ediv*_j(l)(mu)) /
+            (l + ediv*(l+1))
+        )

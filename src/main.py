@@ -1,69 +1,78 @@
 from collections import namedtuple
-from HamiltonianQD import HamiltonianRoca
+from HamiltonianQD import HamiltonianEPI
 import numpy as np
 import itertools as it
 from matplotlib import pyplot as plt
 
 
-ModelConstants = namedtuple('ModelConstants', ['epsilon_0', 'e', 'h'])
+ModelConstants = namedtuple('ModelConstants', ['epsilon_0', 'e', 'hbar'])
 
 R0 = 1
-OMEGA_TO = 4
-EPS_INF = 1/2
-BETA_L = 1
-BETA_T = 9
-EXP_NU = {
-    0: [.5, 4., 7., 10.],
-    1: [-0., 2., 5.5, 8.5, 12.],
+OMEGA_LO = 305
+OMEGA_TO = 238
+EPS_INF_QD = 5.3
+EPS_INF_ENV = 4.64
+EPS_0_QD = OMEGA_LO**2 / OMEGA_TO**2 * EPS_INF_QD
+BETA_L = 5.04e3
+BETA_T = 1.58e3
+EXP_MU = {
+    0: [
+        # .01,
+        1.4, 2.4, 3.4, 4.375, 4.5],
+    1: [
+        # .01,
+        1.6, 2.2, 2.8, 3.9]
 }
-EXP_NU = {}
+LMAX = 1
+NMAX = 3
 
-ham = HamiltonianRoca(
-    R=R0,
-    omega_TO=OMEGA_TO,
-    l_max=1,
-    n_max=3,
-    epsilon_inf_qdot=EPS_INF,
-    epsilon_inf_env=1,
-    constants=ModelConstants(epsilon_0=1, e=1, h=1),
+ham = HamiltonianEPI(
+    r_0=R0,
+    omega_LO=OMEGA_LO,
+    l_max=LMAX,
+    n_max=NMAX,
+    epsilon_inf_qdot=EPS_INF_QD,
+    epsilon_inf_env=EPS_INF_ENV,
+    epsilon_0_qdot=EPS_0_QD,
+    constants=ModelConstants(epsilon_0=1, e=1, hbar=1),
     beta_L=BETA_L,
     beta_T=BETA_T,
-    expected_nu_dict=EXP_NU,
+    expected_mu_dict=EXP_MU,
     large_R_approximation=True,
 )
 
-ham.plot_dispersion_nu(l=0, xdat=np.linspace(0, 5 * R0, 1001))
-ham.plot_dispersion_nu(l=1, xdat=np.linspace(0, 5 * R0, 1001))
+XDAT = np.linspace(-5, 5, 100)
+ham.plot_root_function_mu(l=0, xdat=XDAT, cplx=True)
+ham.plot_root_function_mu(l=1, xdat=XDAT, cplx=True)
 
-print(ham.h())
-
-nmax = 3
-expect_nu = dict(EXP_NU)
+expect_mu = dict(EXP_MU)
 rdat = np.linspace(1, 6, 101)
-wdats_l0 = [np.empty_like(rdat)] * (nmax + 1)
-wdats_l1 = [np.empty_like(rdat)] * (nmax + 1)
+wdats_l0 = [np.empty_like(rdat) for i in range(NMAX + 1)]
+wdats_l1 = [np.empty_like(rdat) for i in range(NMAX + 1)]
 for R, i in zip(rdat, it.count()):
     print('R = {:8.4e}'.format(R))
-    ham = HamiltonianRoca(
-        R=R,
-        omega_TO=OMEGA_TO,
-        l_max=1,
-        n_max=nmax,
-        epsilon_inf_qdot=EPS_INF,
-        epsilon_inf_env=1,
-        constants=ModelConstants(epsilon_0=1, e=1, h=1),
+    ham = HamiltonianEPI(
+        r_0=R,
+        omega_LO=OMEGA_LO,
+        l_max=LMAX,
+        n_max=NMAX,
+        epsilon_inf_qdot=EPS_INF_QD,
+        epsilon_inf_env=EPS_INF_ENV,
+        epsilon_0_qdot=EPS_0_QD,
+        constants=ModelConstants(epsilon_0=1, e=1, hbar=1),
         beta_L=BETA_L,
         beta_T=BETA_T,
-        expected_nu_dict=expect_nu,
+        expected_mu_dict=expect_mu,
         large_R_approximation=True,
     )
-    for omega_n, n in zip(ham.eigenfrequencies(l=0), range(nmax+1)):
-        wdats_l0[n][i] = omega_n
-    for omega_n, n in zip(ham.eigenfrequencies(l=1), range(nmax+1)):
-        wdats_l1[n][i] = omega_n
-    expect_nu = {
-        0: [nu for nu, n in zip(ham._iter_nu_n(l=0), range(nmax+1))],
-        1: [nu for nu, n in zip(ham._iter_nu_n(l=1), range(nmax+1))],
+    print()
+    for omega_n, n in ham.iter_omega_n(l=0):
+        wdats_l0[n][i] = omega_n.real
+    for omega_n, n in ham.iter_omega_n(l=1):
+        wdats_l1[n][i] = omega_n.real
+    expect_mu = {
+        0: [nu for nu, n in ham.iter_mu_n(l=0)],
+        1: [nu for nu, n in ham.iter_mu_n(l=1)],
     }
 
 print('Making plots...')
