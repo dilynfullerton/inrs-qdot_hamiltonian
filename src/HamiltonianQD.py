@@ -12,22 +12,64 @@ import itertools as it
 import numpy as np
 from scipy import optimize as opt
 from scipy import special as sp
-from scipy import fftpack as ft
-from scipy import linalg as lin
-from scipy import interpolate as interp
-import warnings
+from scipy import integrate as integ
 from matplotlib import pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from collections import deque
-import time as tm
-
-warnings.filterwarnings('error')
 
 
+def _get_roots(rootfn, expected_roots):
+    def fn(x):
+        return rootfn(x[0])
+    roots = []
+    for x0 in expected_roots:
+        result = opt.root(fun=fn, x0=x0)
+        if not result.success:
+            print('  FAIL: {}'.format(result.message))
+        else:
+            print('  SUCCESS: {}'.format(result.message))
+            print('  root : x={}'.format(result.x[0]))
+            roots.append(result.x[0])
+    if len(roots) < len(expected_roots):
+        print('  ERR: Found {} of {} expected roots'
+              ''.format(len(roots), len(expected_roots)))
+    return sorted(roots)
+
+
+def _plot_dispersion_function(xdat, rootfn, iterfn):
+    fig, ax = plt.subplots(1, 1)
+
+    xdat = np.array(xdat)
+    ydat = np.array([rootfn(nu=nu) for nu in xdat])
+    ax.plot(xdat, ydat, '-', color='red')
+
+    zxdat = np.array(iterfn)
+    zydat = np.zeros_like(zxdat)
+    ax.plot(zxdat, zydat, 'o', color='green')
+
+    ax.axhline(0., ls='--', lw=1., color='gray', alpha=.5)
+    ax.axvline(0., ls='--', lw=1., color='gray', alpha=.5)
+    plt.show()
+    return fig, ax
+
+
+# Integrating over angles
 def _Y(l, m):
     def fn_y(theta, phi):
         return sp.sph_harm(m, l, phi, theta)
-    return fn_y
+
+    def intfn(theta, phi):
+        return np.sin(theta) * fn_y(theta, phi)
+
+    def ifnr(theta, phi):
+        return np.real(intfn(theta, phi))
+    re = integ.dblquad(func=ifnr, a=0, b=2*np.pi,
+                       gfun=lambda x: 0, hfun=lambda x: np.pi)[0]
+
+    def ifni(theta, phi):
+        return np.imag(intfn(theta, phi))
+    im = integ.dblquad(func=ifni, a=0, b=2*np.pi,
+                       gfun=lambda x: 0, hfun=lambda x: np.pi)[0]
+
+    return re + 1j * im
 
 
 def _J(l, d=0):
@@ -71,150 +113,162 @@ def _g(l, d=0):
     return fn_g
 
 
+class ModelSpaceRoca:
+    def __init__(self, nmax, nfock=2):
+        self.nmax = nmax
+        self.dim = 2 * self.nmax + 1
+        self.nfock = nfock
+
+    def vacuum(self):
+        return qt.tensor([qt.fock_dm(self.nfock, 0)] * self.dim)
+
+    def zero(self):
+        return qt.qzero([self.nfock] * self.dim)
+
+    def one(self):
+        return qt.qeye([self.nfock] * self.dim)
+
+    def b(self, n):
+        assert -self.nmax <= n <= self.nmax
+        if n < 0:
+            n = self.dim + n
+        ops = [qt.qeye(self.nfock)] * self.dim
+        ops.insert(n, qt.destroy(self.nfock))
+        ops.pop(n+1)
+        return qt.tensor(ops)
+
+
 class HamiltonianRoca:
-    def __init__(self, R, omega_TO, l_max, epsilon_inf_qdot, epsilon_inf_env,
-                 constants, beta_T, beta_L, large_R_approximation=True,
-                 omega_min=None, omega_max=None, omega_resolution=1001):
+    def __init__(self, R, omega_TO, l_max, n_max, epsilon_inf_qdot,
+                 epsilon_inf_env, constants, beta_T, beta_L,
+                 large_R_approximation=True, expected_nu_dict=None):
+        self.ms = ModelSpaceRoca(nmax=n_max, nfock=2)
         self.R = R
         self.V_0 = 4/3 * pi * R**3
         self.l_max = l_max
+        self.n_max = n_max
         self.epsilon_inf1 = epsilon_inf_qdot
         self.epsilon_inf2 = epsilon_inf_env
         self.constants = constants
         self._large_R_approximation = large_R_approximation
         self._epsdiv = self.epsilon_inf2 / self.epsilon_inf1
-        self._beta_T_fn = beta_T
-        self._beta_L_fn = beta_L
-        self._omega_TO_fn = omega_TO
-        self._omega_res = omega_resolution
-        self._omega_min_fn = omega_min
-        self._omega_max_fn = omega_max
+        self.beta_T = beta_T
+        self.beta2_T = self.beta_T**2
+        self.beta_L = beta_L
+        self.beta2_L = self.beta_L**2
 
-    def h(self, r, theta, phi):
+        # Frequencies of QD
+        self.omega_TO = omega_TO
+        self.omega2_TO = self.omega_TO**2
+        self.omega2_LO = (self.omega2_TO * self.constants.epsilon_0 /
+                          self.epsilon_inf1)
+        self.omega_LO = np.sqrt(self.omega2_LO)
+
+        self._nu_n_dict = dict()  # l -> [nu_0, nu_1, ..., nu_n]
+        self._expected_nu_n_dict = dict()
+
+        if expected_nu_dict is not None:
+            for l, nulist in expected_nu_dict.items():
+                self._expected_nu_n_dict[l] = sorted(list(nulist))
+
+    # Making the assumption that spatial coordinates can be integrated over
+    def h(self):
         """Electron-phonon interaction Hamiltonian at spherical coordinates
         (r, theta, phi). The definition is based on (Roca, Eq. 42).
         """
-        h = self._C_F(r) * self.R * np.sqrt(2*pi)
+        h = self._C_F() * self.R * np.sqrt(2*pi)
         hi = 0
         for l in range(self.l_max+1):
             h_l = (2*l + 1) * 1j**l
             h_li = 0
             for m in range(-l, l+1):
-                h_m = _Y(l, m)(theta, phi)
+                h_m = _Y(l, m)
                 h_mi = 0
-                for nu_nl, n in zip(self._gen_nu(l)(r), it.count()):
+                for nu_nl, n in zip(self._iter_nu_n(l=l), range(self.n_max+1)):
                     h_mi += (
-                        1 / nu_nl *
-                        self._Phibar(nu_nl, l)(r) *
+                        1 / nu_nl * self._Phibar(nu_nl, l) *
                         (self._b(n) + self._b(-n).dag())
                     )
                 h_li += h_m * h_mi
             hi += h_l * h_li
-        return h
+        h *= hi
+        return h + h.dag()
 
-    def eigenfrequencies(self, l, r):
-        nulist = self._gen_nu(l=l)(r=r)
-        # TODO: should probably not have to cast to real
-        omeglist = [abs(self.omega(r=r, nu=nu)) for nu in nulist]
+    def eigenfrequencies(self, l):
+        nulist = self._iter_nu_n(l=l)
+        omeglist = [self.omega(nu=nu) for nu in nulist]
         return sorted(omeglist)
 
-    def _gen_nu(self, l):
-        if self._large_R_approximation:
-            return self._gen_nu_large_R(l)
+    def _iter_nu_n(self, l):
+        if l not in self._expected_nu_n_dict:
+            return []
+        elif l in self._nu_n_dict:
+            return self._nu_n_dict[l]
+        elif self._large_R_approximation:
+            rootfn = self._root_function_nu_large_R(l=l)
         else:
-            return self._gen_nu_full(l)
+            rootfn = self._root_function_nu_full(l=l)
+        roots = _get_roots(
+            rootfn=rootfn, expected_roots=self._expected_nu_n_dict[l])
+        self._nu_n_dict[l] = sorted(roots)
+        return roots
 
-    def _nu_min(self, r):
-        return self._nu(omega2=self._omega2_max(r=r), r=r)
+    def plot_dispersion_nu(self, l, xdat):
+        if self._large_R_approximation:
+            return _plot_dispersion_function(
+                xdat=xdat, rootfn=self._root_function_nu_large_R(l=l),
+                iterfn=self._iter_nu_n(l=l)
+            )
+        else:
+            return _plot_dispersion_function(
+                xdat=xdat, rootfn=self._root_function_nu_large_R(l=l),
+                iterfn=self._iter_nu_n(l=l)
+            )
 
-    def _nu_max(self, r):
-        return self._nu(omega2=self._omega2_min(r=r), r=r)
+    def _root_function_nu_large_R(self, l):
+        def rootfn(nu):
+            Q0 = self._Q(nu=nu)
 
-    def _nu_res(self):
-        return self._omega_res
+            c1 = _J(l, d=1)(self._q(nu=nu) * self.R)
+            c2 = _g(l, d=1)(Q0 * self.R)
+            c3 = (
+                (self.omega2_LO - self.omega2(nu=nu)) /
+                self.beta2_T * l / Q0 + Q0 * self._lbar2(l)
+            )
+            return c1 * c2 * c3
+        return rootfn
 
-    def _gen_nu_large_R(self, l):
-        def fn_gen_nu_large_r(r):
-            R = self.R
-            q = self._q
-            Q = self._Q
-
-            def f1(nu):
-                return _J(l, d=1)(q(nu=nu) * R)
-
-            def f2(nu):
-                Q0 = Q(r=r, nu=nu)
-                return _g(l, d=1)(Q0 * R)
-
-            def f3(nu):
-                Q0 = Q(r=r, nu=nu)
-                return (
-                    (self.omega2_LO(r=r) - self.omega2(r=r, nu=nu)) /
-                    self._beta2_T(r=r) * l / Q0 + Q0 * self._lbar2(l)
-                )
-
-            def fprod(nu):
-                c1 = f1(nu)
-                c2 = f2(nu)
-                c3 = f3(nu)
-                return c1 * c2 * c3
-
+    def _root_function_nu_full(self, l):
+        def rootfn(nu):
             return 0  # TODO
-        return fn_gen_nu_large_r
 
-    def _gen_nu_full(self, l):
-        yield 0  # TODO
+        return rootfn
 
     def _lbar2(self, l):
         return l + (l + 1) * self._epsdiv
 
-    def _gamma_0(self, r, dnu=0):
+    def _gamma_0(self, dnu=0):
         if dnu > 0:
             return 0
         else:
-            return (self.omega2_LO(r) - self.omega2_TO(r)) / self._beta2_T(r)
+            return (self.omega2_LO - self.omega2_TO) / self.beta2_T
 
-    def omega2_LO(self, r):
-        return (self.omega2_TO(r) *
-                self.constants.epsilon_0 / self._epsilon_inf(r=r))
-
-    def omega2_TO(self, r):
-        if callable(self._omega_TO_fn):
-            return self._omega_TO_fn(r)**2
-        else:
-            return self._omega_TO_fn**2
-
-    def _omega2_min(self, r):
-        if self._omega_min_fn is None:
-            omega2to = self.omega2_TO(r=r)
-            return omega2to + (self.omega2_LO(r=r)-omega2to)/self._omega_res
-        elif callable(self._omega_min_fn):
-            return self._omega_min_fn(r=r)**2
-        else:
-            return self._omega_min_fn**2
-
-    def _omega2_max(self, r):
-        if self._omega_max_fn is None:
-            omega2lo = self.omega2_LO(r=r)
-            return omega2lo - (omega2lo-self.omega2_TO(r=r))/self._omega_res
-        elif callable(self._omega_max_fn):
-            return self._omega_max_fn(r=r)**2
-        else:
-            return self._omega_max_fn**2
-
-    def _nu(self, omega2, r):
+    def _nu(self, omega2):
         return self.R * np.sqrt(
-            (self.omega2_LO(r=r) - omega2) / self._beta2_L(r=r)
+            (self.omega2_LO - omega2) / self.beta2_L
         )
 
-    def _mu(self, r, nu, dnu=0):
-        return self._Q(r=r, nu=nu, dnu=dnu) * self.R
+    def _mu(self, nu, dnu=0):
+        return self._Q(nu=nu, dnu=dnu) * self.R
 
-    def _Q(self, r, nu, dnu=0):
-        return (
-            self._beta2_L(r=r)/self._beta2_T(r=r) *
-            self._q(nu=nu, dnu=dnu) - self._gamma_0(r=r, dnu=dnu)
-        )
+    def _Q(self, nu, dnu=0):
+        bfrac = self.beta2_L / self.beta2_T
+        q = self._q(nu=nu, dnu=dnu)
+        gam = self._gamma_0(dnu=dnu)
+        ans = bfrac * q - gam
+        print(q)
+        assert ans >= 0
+        return ans
 
     def _q(self, nu, dnu=0):
         if dnu == 0:
@@ -224,45 +278,41 @@ class HamiltonianRoca:
         else:
             return 0
 
-    def omega(self, r, nu, dnu=0):
+    def omega(self, nu, dnu=0):
         if dnu == 0:
-            return np.sqrt(complex(self.omega2(r=r, nu=nu)))
+            return np.sqrt(self.omega2(nu=nu))
         elif dnu == 1:
-            return self.omega2(r=r, nu=nu, dnu=1) / 2 / self.omega(r=r, nu=nu)
+            return self.omega2(nu=nu, dnu=1) / 2 / self.omega(nu=nu)
         else:
             print('Why am I here?')  # TODO define this behavior
             raise RuntimeError
 
-    def omega2(self, r, nu, dnu=0):
+    def omega2(self, nu, dnu=0):
         if dnu == 0:
-            return self.omega2_LO(r=r) - self._beta2_L(r=r) * (nu / self.R)**2
+            om2 = self.omega2_LO - self.beta2_L * (nu / self.R)**2
+            if not om2 >= 0:
+                print('omega2_LO = {}'.format(self.omega2_LO))
+                print('beta2_L = {}'.format(self.beta2_L))
+                print('nu = {}'.format(nu))
+                print('R = {}'.format(self.R))
+                print('omega2 = {}'.format(om2))
+            assert om2 >= 0
         elif dnu == 1:
-            return -2 * self._beta2_L(r=r) * nu / self.R**2
+            om2 = -2 * self.beta2_L * nu / self.R**2
         elif dnu == 2:
-            return -2 * self._beta2_L(r=r) / self.R**2
+            om2 = -2 * self.beta2_L / self.R**2
         else:
-            return 0
+            om2 = 0
+        return om2
 
-    def _beta2_T(self, r):
-        return self._beta_T_fn**2
-
-    def _beta2_L(self, r):
-        return self._beta_L_fn**2
-
-    def _C_F(self, r):
+    def _C_F(self):
         e = self.constants.e
         h = self.constants.h
         eps0 = self.constants.epsilon_0
-        return e * np.sqrt(
-            h * np.sqrt(self.omega2_LO(r=r)) / self.V_0 *
-            (1/self._epsilon_inf(r=r) - 1/eps0)
+        return (
+            e * np.sqrt(h / self.V_0 * self.omega_LO) *
+            np.sqrt(1 / self.epsilon_inf1 - 1/eps0)
         )
-
-    def _epsilon_inf(self, r):
-        if r <= self.R:
-            return self.epsilon_inf1
-        else:
-            return self.epsilon_inf2
 
     def _Phibar(self, nu, l):
         def _fn_phibar(r):
@@ -276,7 +326,7 @@ class HamiltonianRoca:
                 return (
                     (nu * _j(l, d=1)(nu) - l * _j(l)(nu)) * rr**(-l-1)
                 )
-        return _fn_phibar
+        return integ.quad(func=_fn_phibar, a=0, b=self.R)[0]
 
     def _b(self, n):
-        return qt.qzero(2)  # TODO
+        return self.ms.b(n=n)
