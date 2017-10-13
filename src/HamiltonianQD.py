@@ -269,9 +269,11 @@ class HamiltonianEPI:
         self._periodic_roots = periodic_roots
         self._expected_root_period = dict()
         self._expected_num_roots = num_roots
-        self._periodic_roots_start = np.sqrt(
-            self.gamma * self.r_0**2 / self._beta_div2
-        )
+        self._periodic_roots_start = periodic_roots_start_dict
+
+        # self._periodic_roots_start = np.sqrt(
+        #     self.gamma * self.r_0**2 / self._beta_div2
+        # )
 
         self._expected_roots_mu = dict()
 
@@ -281,6 +283,11 @@ class HamiltonianEPI:
             self._expected_roots_mu.update(expected_mu_dict)
         if expected_root_period_dict is not None:
             self._expected_root_period.update(expected_root_period_dict)
+        if self._periodic_roots_start is None:
+            for l in range(l_max + 1):
+                self._periodic_roots_start[l] = np.sqrt(
+                    self.gamma * self.r_0**2 / self._beta_div2
+                )
 
         if self._expected_num_roots is None:
             self._expected_num_roots = 2 * self.n_max + 1
@@ -373,8 +380,11 @@ class HamiltonianEPI:
         else:
             return None
 
-    def _get_periodic_root_start(self):
-        return np.sqrt(self.gamma * self.r_0**2 / self._beta_div2)
+    def _get_periodic_root_start(self, l):
+        if self._periodic_roots_start is None or l not in self._periodic_roots_start:
+            return np.sqrt(self.gamma * self.r_0**2 / self._beta_div2)
+        else:
+            return self._periodic_roots_start[l]
 
     def _get_root_function_mu(self, l):
         def rootfn(mu):
@@ -522,7 +532,7 @@ class HamiltonianEPI:
                         rootfn=self._get_root_function_mu(l=l),
                         expected_period=self._expected_root_period[l],
                         num_roots=self._expected_num_roots,
-                        x0=self._periodic_roots_start*(1.+1.e-4),
+                        x0=self._get_periodic_root_start(l=l)*(1.+1.e-4),
                         verbose=self._verbose_roots,
                     )
                 else:

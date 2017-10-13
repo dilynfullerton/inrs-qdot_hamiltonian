@@ -39,18 +39,20 @@ EXP_MU_LARGE_R = {
     0: [4.5, 7.7, 10.9, 14.1, 17.2],
     1: [5.9, 9.2, 12.4, 15.6],
 }
-EXP_PERIODIC_START_LARGE_R = {
-    0: 4.5,
-    1: 5.9,
+EXP_PERIODIC_START = {
+    # 0: 1.7,
+    # 1: 4.1,
 }
-EXP_ROOT_PERIOD_LARGE_R = {
+EXP_ROOT_PERIOD = {
     0: 3.25,
     1: 3.25,
+    # 0: .5,
+    # 1: .5,
 }
-MU_ROUND = 6
+MU_ROUND = 3
 
 LMAX = 1
-NMODES = 3
+NMODES = 20
 NMAX = NMODES - 1
 LARGE_R = True
 if LARGE_R:
@@ -75,8 +77,8 @@ ham = HamiltonianEPI(
     large_R_approximation=LARGE_R,
     verbose_roots=True,
     periodic_roots=True,
-    periodic_roots_start_dict=EXP_PERIODIC_START_LARGE_R,
-    expected_root_period_dict=EXP_ROOT_PERIOD_LARGE_R,
+    periodic_roots_start_dict=EXP_PERIODIC_START,
+    expected_root_period_dict=EXP_ROOT_PERIOD,
 )
 
 XDAT = np.linspace(-5, 20, 1000)
@@ -84,7 +86,7 @@ ham.plot_root_function_mu(l=0, xdat=XDAT)
 ham.plot_root_function_mu(l=1, xdat=XDAT)
 
 expect_mu = dict(EXP_MU)
-expect_period = dict(EXP_ROOT_PERIOD_LARGE_R)
+expect_period = dict(EXP_ROOT_PERIOD)
 rdat = np.linspace(R0, R1, 101)
 wdats_l0 = [[] for i in range(NMAX + 1)]
 wdats_l1 = [[] for i in range(NMAX + 1)]
@@ -107,7 +109,7 @@ for R, i in zip(rdat, it.count()):
         large_R_approximation=LARGE_R,
         verbose_roots=True,
         periodic_roots=True,
-        periodic_roots_start_dict=EXP_PERIODIC_START_LARGE_R,
+        periodic_roots_start_dict=EXP_PERIODIC_START,
         expected_root_period_dict=expect_period,
     )
     print()
@@ -144,7 +146,7 @@ axes[1].axhline(ham.omega_F, ls='--', color='gray', alpha=.5)
 
 for wdat, mode in zip(wdats_l0, it.count()):
     axes[0].plot(rdat, np.real(wdat), '-',
-                 label='n={:.2e}'.format(mode),
+                 label='n={}'.format(mode),
                  color=sm.to_rgba(mode))
     # axes[0].plot(rdat, np.imag(wdat), '-.',
     #              label='mu={}, Im'.format(ham.mu_nl(n=mode, l=0)),
@@ -152,7 +154,7 @@ for wdat, mode in zip(wdats_l0, it.count()):
 
 for wdat, mode in zip(wdats_l1, it.count()):
     axes[1].plot(rdat, np.real(wdat), '-',
-                 label='={:.2e}'.format(mode),
+                 label='n={}'.format(mode),
                  color=sm.to_rgba(mode))
     # axes[1].plot(rdat, np.imag(wdat), '-.',
     #              label='mu={}, Im'.format(ham.mu_nl(n=mode, l=1)),
