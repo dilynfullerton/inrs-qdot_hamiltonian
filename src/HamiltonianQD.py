@@ -33,6 +33,7 @@ def _get_roots(rootfn, expected_roots, round_place=None, verbose=False):
         print(expected_roots)
     n = 0
     for x0 in zip(expected_roots):
+        x0 = complex(x0)
         result = opt.root(fun=fn, x0=np.array([x0.real, x0.imag]))
         root = result.x[0]
         if round_place is not None:
@@ -306,21 +307,18 @@ class HamiltonianEPI:
     def iter_lmn(self):
         for l in range(self.l_max+1):
             for m in range(-l, l+1):
-                for mu_n, n in zip(self.iter_mu(l), range(self.n_max+1)):
+                for mu_n, n in self.iter_mu_n(l=l):
                     yield l, m, n
 
-    def iter_mu(self, l):
-        for n in range(self.n_max + 1):
-            mu = self.mu_nl(n=n, l=l)
-            if mu is None:
-                break  # TODO: Anything else?
-            else:
-                yield mu
-
     def iter_mu_n(self, l):
-        for mu, n in zip(self.iter_mu(l=l), range(self.n_max+1)):
-            if mu is not None:
-                yield mu, n
+        for n, i in zip(range(self.n_max + 1), it.count()):
+            mu = self.mu_nl(n=n, l=l)
+            # yield mu, i
+            yield mu, n
+
+    def iter_mu(self, l):
+        for mu, n in self.iter_mu_n(l=l):
+            yield mu
 
     def iter_omega_n(self, l):
         for mu, n in self.iter_mu_n(l):
@@ -357,16 +355,11 @@ class HamiltonianEPI:
         # elif n > self.n_max:
         if n > self.n_max:
             return None
-        elif l not in self._roots_mu or len(self._roots_mu[l]) == 0:
+        elif (l, n) not in self._roots_mu:
             raise RuntimeError  # TODO
             # return 0  # TODO get rid of this
-        elif n >= len(self._roots_mu[l]):
-            if self._verbose_roots:
-                print('>> No root found for l={} and n={}'.format(l, n))
-            return None  # TODO
-            # return 0  # TODO get rid of this
         else:
-            return self._roots_mu[l][n]
+            return self._roots_mu[l, n]
 
     def _get_expected_roots_mu(self, l):
         if l in self._expected_roots_mu:
@@ -540,11 +533,6 @@ class HamiltonianEPI:
                     expected_roots=self._get_expected_roots_mu(l=l),
                     verbose=self._verbose_roots
                 )
-            # Round values
-            if self._mu_round is not None:
-                new_roots = [round(r, self._mu_round) for r in new_roots]
-            # Remove duplicates
-            new_roots = set(new_roots)
             # Sort and update
-            self._roots_mu[l] = sorted(list(new_roots),
-                                       key=lambda x: abs(x))
+            for root, mode in zip(new_roots, modes):
+                self._roots_mu[l, mode] = root

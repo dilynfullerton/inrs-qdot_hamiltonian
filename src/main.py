@@ -4,6 +4,7 @@ import numpy as np
 import itertools as it
 from matplotlib import pyplot as plt
 from matplotlib import cm, colors
+from scipy import interpolate as interp
 
 
 ModelConstants = namedtuple('ModelConstants', ['epsilon_0', 'e', 'hbar'])
@@ -84,9 +85,9 @@ ham.plot_root_function_mu(l=1, xdat=XDAT)
 
 expect_mu = dict(EXP_MU)
 expect_period = dict(EXP_ROOT_PERIOD_LARGE_R)
-rdat = np.linspace(R0, R1, 1001)
-wdats_l0 = [np.empty(shape=rdat.shape, dtype=complex) for i in range(NMAX + 1)]
-wdats_l1 = [np.empty(shape=rdat.shape, dtype=complex) for i in range(NMAX + 1)]
+rdat = np.linspace(R0, R1, 101)
+wdats_l0 = [[] for i in range(NMAX + 1)]
+wdats_l1 = [[] for i in range(NMAX + 1)]
 for R, i in zip(rdat, it.count()):
     print('R = {:8.4e}'.format(R))
     ham = HamiltonianEPI(
@@ -114,9 +115,9 @@ for R, i in zip(rdat, it.count()):
         # ham.plot_root_function_mu(l=0, xdat=XDAT)
         # ham.plot_root_function_mu(l=1, xdat=XDAT)
     for omega_n, n in ham.iter_omega_n(l=0):
-        wdats_l0[n][i] = omega_n
+        wdats_l0[n].append(omega_n)
     for omega_n, n in ham.iter_omega_n(l=1):
-        wdats_l1[n][i] = omega_n
+        wdats_l1[n].append(omega_n)
     # expect_period = {
     #     0: ham.mu_nl(n=1, l=0) - ham.mu_nl(n=0, l=0),
     #     1: ham.mu_nl(n=1, l=1) - ham.mu_nl(n=1, l=1),
