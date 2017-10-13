@@ -22,41 +22,44 @@ from matplotlib import mlab
 import itertools as it
 
 
-def _get_roots(rootfn, expected_roots):
+def _get_roots(rootfn, expected_roots, verbose=False):
     def fn(x):
         ans = rootfn(x[0] + 1j*x[1])
         return np.array([ans.real, ans.imag])
     roots = []
+    print(expected_roots)
     for x0 in expected_roots:
         result = opt.root(fun=fn, x0=np.array([x0.real, x0.imag]))
-        if not result.success:
+        if not result.success and verbose:
             print('>>  FAIL: {}'.format(result.message))
         else:
-            # print('>>  SUCCESS: {}'.format(result.message))
-            print('>>  SUCCESS')
-            print('      root: x={}'.format(result.x[0]))
+            if verbose:
+                print('>>  SUCCESS')
+                print('      root: x={}'.format(result.x[0]))
             roots.append(result.x[0])
-    if len(roots) < len(expected_roots):
+    if len(roots) < len(expected_roots) and verbose:
         print('>>  ERR: Found {} of {} expected roots'
               ''.format(len(roots), len(expected_roots)))
-    return sorted(roots)
+    roots = sorted(roots, key=lambda x: abs(x))
+    if verbose:
+        print('>> roots = {}'.format(roots))
+    return roots
 
 
-def _plot_dispersion_function(xdat, rootfn, iterfn, ximag=False):
+def _plot_dispersion_function(xdat, rootfn, iterfn):
     fig, ax = plt.subplots(1, 1)
 
     xdat = np.array(xdat)
-    if ximag:
-        xdat = np.imag(xdat)
-    else:
-        xdat = np.real(xdat)
+    ydatr = np.array([rootfn(x) for x in xdat])
+    # ydati = np.array([rootfn(1j * x) for x in xdat])
 
-    ydat = np.array([rootfn(x) for x in xdat])
-    ax.plot(xdat, np.real(ydat), '-', color='red')
+    ax.plot(xdat, np.real(ydatr), '-', color='red')
+    # ax.plot(xdat, np.real(ydati), '-', color='blue')
 
     zxdat = np.array(list(iterfn))
-    zydat = np.zeros_like(zxdat)
-    ax.plot(zxdat, zydat, 'o', color='green')
+    zydat = np.zeros(shape=zxdat.shape, dtype=np.float)
+    ax.plot(np.real(zxdat), zydat, 'o', color='green', alpha=.75)
+    # ax.plot(np.imag(zxdat), zydat, 'o', color='orange', alpha=.75)
 
     ax.axhline(0., ls='--', lw=1., color='gray', alpha=.5)
     ax.axvline(0., ls='--', lw=1., color='gray', alpha=.5)
@@ -107,6 +110,7 @@ def _J(l, d=0):
 
 def _spherical_bessel1(l, func, d=0):
     def fn_spb(x):
+        x = complex(x)
         if d == 0:
             return func(n=l, z=x, derivative=False)
         elif d == 1:
@@ -169,35 +173,47 @@ class ModelSpaceEPI:
 
 
 class HamiltonianEPI:
-    def __init__(self, r_0, omega_LO, l_max, n_max,
+    def __init__(self, r_0, omega_LO, l_max, max_n_modes,
                  epsilon_0_qdot, epsilon_inf_qdot,
                  epsilon_inf_env, constants, beta_T, beta_L,
-                 large_R_approximation=True,
-                 expected_mu_dict=None, known_mu_dict=None):
-        self.ms = ModelSpaceEPI(nmax=n_max, nfock=2)
+                 large_R_approximation=False,
+                 verbose_roots=False, expected_mu_dict=None,
+                 known_mu_dict=None, mu_round=None):
         self.r_0 = r_0
         self.V = 4/3 * pi * self.r_0**3
         self.l_max = l_max
-        self.n_max = n_max
+        self.n_max = max_n_modes - 1
+        self.ms = ModelSpaceEPI(nmax=self.n_max, nfock=2)
         self.const = constants
         self.eps_a_0 = epsilon_0_qdot
         self.eps_a_inf = epsilon_inf_qdot
-        self._eps_div = epsilon_inf_env / self.eps_a_inf
+        self.eps_b_inf = epsilon_inf_env
+        self._eps_div = self.eps_b_inf / self.eps_a_inf
         self.beta_L2 = beta_L**2
         self.beta_T2 = beta_T**2
         self._beta_div2 = self.beta_L2 / self.beta_T2
-        self._omega_L = omega_LO
-        self.omega_L2 = self._omega_L**2
+        self.omega_L = omega_LO
+        self.omega_L2 = self.omega_L**2
         self.omega_T2 = self.omega_L2 * self.eps_a_inf / self.eps_a_0
+        self.omega_T = np.sqrt(self.omega_T2)
+        self.omega_F2 = (
+            self.omega_T2 * (self.const.epsilon_0 + 2 * self.eps_b_inf) /
+            (self.eps_a_inf + 2 * self.eps_b_inf)
+        )
+        self.omega_F = np.sqrt(self.omega_F2)
         # NOTE: The following definition for gamma is different from gamma_0
         # of Riera
         self.gamma = (self.omega_L2 - self.omega_T2) / self.beta_T2
         self.C_F = -np.sqrt(
-            2*pi * self.const.e**2 * self.const.hbar * self._omega_L / self.V *
+            2 * pi * self.const.e ** 2 * self.const.hbar * self.omega_L / self.V *
             (1/self.eps_a_inf - 1/self.eps_a_0)
         )
+        self._large_R = large_R_approximation
+
+        self._mu_round = mu_round
         self._expected_roots_mu = dict()
         self._roots_mu = dict()
+        self._verbose_roots = verbose_roots
 
         if known_mu_dict is not None:
             self._roots_mu.update(known_mu_dict)
@@ -239,13 +255,13 @@ class HamiltonianEPI:
 
     def iter_mu_n(self, l):
         for mu, n in zip(self.iter_mu(l=l), range(self.n_max+1)):
-            yield mu, n
+            if mu is not None:
+                yield mu, n
 
     def iter_omega_n(self, l):
         for mu, n in self.iter_mu_n(l):
             yield self.omega(mu=mu), n
 
-    # TODO continue search for errors
     def omega(self, mu):
         return np.sqrt(
             complex(self.omega_L2 - self.beta_L2 * self.q(mu=mu)**2)
@@ -277,46 +293,45 @@ class HamiltonianEPI:
         elif n > self.n_max:
             return None
         elif l not in self._roots_mu or len(self._roots_mu[l]) == 0:
-            roots = _get_roots(
-                rootfn=self._get_root_function_mu(l=l),
-                expected_roots=self._get_expected_roots_mu(l=l)
-            )
-            self._roots_mu[l] = sorted(roots)
-            return self.mu_nl(n=n, l=l)
+            raise RuntimeError  # TODO
         elif n >= len(self._roots_mu[l]):
-            print('>> No root found for l={} and n={}'.format(l, n))
+            if self._verbose_roots:
+                print('>> No root found for l={} and n={}'.format(l, n))
             return None  # TODO
         else:
             return self._roots_mu[l][n]
 
     def _get_expected_roots_mu(self, l):
         if l in self._expected_roots_mu:
-            return sorted(self._expected_roots_mu[l])
+            return sorted(self._expected_roots_mu[l], key=lambda x: abs(x))
         else:
             return []
 
     def _get_root_function_mu(self, l):
         def rootfn(mu):
-            if mu < 0:
-                print('hi')
             nu = self.nu(mu=mu)
             dj_mu = _j(l, d=1)(mu)
-            fl_nu = self._F_l(l=l)(nu=nu)
-            jl_mu = _j(l)(mu)
-            gl_nu = self._G_l(l=l)(nu=nu)
-            ans = (
-                nu * dj_mu * fl_nu -
-                l * (l + 1) * jl_mu * gl_nu
-            )
-            assert not np.isnan(ans)
-            return ans
+            if self._large_R:
+                return (
+                    mu * nu * dj_mu * _g(l, d=1)(mu) *
+                    (self.gamma * l / self.Q(mu=mu)**2 +
+                     (l + self._eps_div * (l + 1)))
+                )
+            else:
+                Fl_nu = self._F_l(l=l)(nu=nu)
+                jl_mu = _j(l)(mu)
+                Gl_nu = self._G_l(l=l)(nu=nu)
+                return (
+                    mu * dj_mu * Fl_nu -
+                    l * (l + 1) * jl_mu * Gl_nu
+                )
         return rootfn
 
-    def plot_root_function_mu(self, l, xdat, ximag=False, cplx=False):
+    def plot_root_function_mu(self, l, xdat, cplx=False):
         if not cplx:
             return _plot_dispersion_function(
                 xdat=xdat, rootfn=self._get_root_function_mu(l=l),
-                iterfn=self.iter_mu(l=l), ximag=ximag
+                iterfn=self.iter_mu(l=l)
             )
         else:
             return _plot_dispersion_function2d(
@@ -415,12 +430,20 @@ class HamiltonianEPI:
 
     def _fill_roots_mu(self):
         for l in range(self.l_max + 1):
+            # Get roots from expected
             new_roots = _get_roots(
                 rootfn=self._get_root_function_mu(l=l),
-                expected_roots=self._get_expected_roots_mu(l=l)
+                expected_roots=self._get_expected_roots_mu(l=l),
+                verbose=self._verbose_roots
             )
+            # Add known roots
             if l in self._roots_mu:
-                old_roots = filter(lambda r: r not in new_roots,
-                                   self._roots_mu[l])
-                new_roots = sorted(new_roots + list(old_roots))
-            self._roots_mu[l] = new_roots
+                new_roots.extend(self._roots_mu[l])
+            # Round values
+            if self._mu_round is not None:
+                new_roots = [round(r, self._mu_round) for r in new_roots]
+            # Remove duplicates
+            new_roots = set(new_roots)
+            # Sort and update
+            self._roots_mu[l] = sorted(list(new_roots),
+                                       key=lambda x: abs(x))
