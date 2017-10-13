@@ -6,7 +6,7 @@ field.
 The definitions used in the theoretical model are based on
 
 Electron Raman Scattering in Nanostructures
-R. Betancourt-Riera, R. Riera, J. L. Marín
+R. Betancourt-Riera, R. Riera, J. L. Marin
 Centro de Investigación en Física, Universidad de Sonora, 83190 Hermosillo, Sonora, México
 R. Rosas
 Departamento de Física, Universidad de Sonora, 83000 Hermosillo, Sonora, México
@@ -17,8 +17,8 @@ import numpy as np
 from scipy import optimize as opt
 from scipy import special as sp
 from scipy import integrate as integ
+from scipy import interpolate as interp
 from matplotlib import pyplot as plt
-from matplotlib import mlab
 import itertools as it
 
 
@@ -60,7 +60,6 @@ def _get_roots_periodic(rootfn, expected_period, num_roots,
                         max_iter_per_root=10):
     def fn(x):
         ans = rootfn(x[0] + 1j * x[1])
-        ans = ans / abs(x[0])
         return np.array([ans.real, ans.imag])
     roots = []
     modes = []
@@ -87,14 +86,43 @@ def _get_roots_periodic(rootfn, expected_period, num_roots,
             break
         else:
             x0 += expected_period / 2
-    roots = sorted(roots, key=lambda x: abs(x))
     if verbose:
         print('>> roots = {}'.format(roots))
     return roots, modes
 
 
-def _plot_dispersion_function(xdat, rootfn, iterfn):
-    fig, ax = plt.subplots(1, 1)
+def _get_roots_interpolate(
+        rootfn, expected_period, num_roots, round_place=None, x0=None,
+        verbose=False, npts=1000,
+):
+    if x0 is None:
+        x0 = expected_period / 2 + 0.j
+    else:
+        x0 += expected_period / 2
+    xdat = np.linspace(x0, x0 + num_roots * expected_period, npts)
+    ydat = np.array([rootfn(x) for x in xdat])
+
+    print(xdat)
+    print(ydat)
+
+    interpfn_re = interp.make_interp_spline(xdat, np.real(ydat))
+    interpfn_im = interp.make_interp_spline(xdat, np.imag(ydat))
+
+    # def fn(x):
+    #     ans_re = interpfn_re(x[0] + 1j * x[1])
+    #     ans_im = interpfn_im(x[0] + 1j * x[1])
+    #     return np.array([ans_re, ans_im])
+
+    roots = interp.sproot(interpfn_re, num_roots)
+    return sorted(list(roots)), list(range(len(roots)))
+
+
+def _plot_dispersion_function(xdat, rootfn, iterfn, fig=None, ax=None,
+                              show=True):
+    if fig is None and ax is None:
+        fig, ax = plt.subplots(1, 1)
+    elif ax is None:
+        ax = fig.add_subplot(111)
 
     xdat = np.array(xdat)
     ydatr = np.array([rootfn(x) for x in xdat])
@@ -110,8 +138,9 @@ def _plot_dispersion_function(xdat, rootfn, iterfn):
 
     ax.axhline(0., ls='--', lw=1., color='gray', alpha=.5)
     ax.axvline(0., ls='--', lw=1., color='gray', alpha=.5)
-    plt.show()
-    return fig, ax
+    if show:
+        plt.show()
+    return ydatr, ax
 
 
 def _plot_dispersion_function2d(xdat, ydat, rootfn, iterfn):
@@ -224,12 +253,13 @@ class HamiltonianEPI:
                  epsilon_0_qdot, epsilon_inf_qdot,
                  epsilon_inf_env, constants, beta_T, beta_L,
                  large_R_approximation=False,
-                 periodic_roots=False,
+                 periodic_roots=False, interp_roots=False,
                  periodic_roots_start_dict=None,
                  expected_root_period_dict=None,
                  num_roots=None,
                  verbose_roots=False, expected_mu_dict=None,
-                 known_mu_dict=None, mu_round=None):
+                 known_mu_dict=None, mu_round=None,
+                 num_points_interp=1000):
         self.r_0 = r_0
         self.V = 4/3 * pi * self.r_0**3
         self.l_max = l_max
@@ -267,9 +297,11 @@ class HamiltonianEPI:
         self._verbose_roots = verbose_roots
 
         self._periodic_roots = periodic_roots
+        self._interp_roots = interp_roots
         self._expected_root_period = dict()
         self._expected_num_roots = num_roots
         self._periodic_roots_start = periodic_roots_start_dict
+        self._num_points_interp = num_points_interp
 
         # self._periodic_roots_start = np.sqrt(
         #     self.gamma * self.r_0**2 / self._beta_div2
@@ -363,7 +395,8 @@ class HamiltonianEPI:
         if n > self.n_max:
             return None
         elif (l, n) not in self._roots_mu:
-            raise RuntimeError  # TODO
+            return 0
+            # raise RuntimeError  # TODO
             # return 0  # TODO get rid of this
         else:
             return self._roots_mu[l, n]
@@ -406,27 +439,12 @@ class HamiltonianEPI:
                 )
         return rootfn
 
-    def plot_root_function_mu(self, l, xdat, cplx=False):
-        # xdat = np.array(xdat)
-        # ydat_nu = np.empty(shape=xdat.shape, dtype=np.complex)
-        # ydat_dj_mu = np.empty(shape=xdat.shape, dtype=np.complex)
-        # ydat_dg_mu = np.empty(shape=xdat.shape, dtype=np.complex)
-        # ydat_Qinv2 = np.empty(shape=xdat.shape, dtype=np.complex)
-        # for x, i in zip(xdat, it.count()):
-        #     ydat_nu[i] = self.nu(mu=x)
-        #     ydat_dj_mu[i] = _j(l, d=1)(x)
-        #     ydat_dg_mu[i] = _g(l, d=1)(x)
-        #     ydat_Qinv2[i] = 1 / self.Q(mu=x)**2
-        # fig, ax = plt.subplots(1, 1)
-        # for ydat, lab in [(ydat_nu, 'nu'), (ydat_dj_mu, 'dj'), (ydat_dg_mu, 'dg'), (ydat_Qinv2, '1/Q^2')]:
-        #     ax.plot(xdat, np.real(ydat), label=lab+' RE')
-        #     ax.plot(xdat, np.imag(ydat), label=lab+' IM')
-        # ax.legend()
-        # plt.show()
+    def plot_root_function_mu(self, l, xdat, cplx=False, fig=None, ax=None,
+                              show=True):
         if not cplx:
             return _plot_dispersion_function(
                 xdat=xdat, rootfn=self._get_root_function_mu(l=l),
-                iterfn=self.iter_mu(l=l)
+                iterfn=self.iter_mu(l=l), fig=fig, ax=ax, show=show
             )
         else:
             return _plot_dispersion_function2d(
@@ -537,6 +555,16 @@ class HamiltonianEPI:
                     )
                 else:
                     new_roots, modes = [], []
+            elif self._interp_roots:
+                if l in self._expected_root_period:
+                    new_roots, modes = _get_roots_interpolate(
+                        rootfn=self._get_root_function_mu(l=l),
+                        expected_period=self._expected_root_period[l],
+                        num_roots=self._expected_num_roots,
+                        x0=self._get_periodic_root_start(l=l)*(1.+1.e-4),
+                        verbose=self._verbose_roots,
+                        npts=self._num_points_interp
+                    )
             else:
                 new_roots, modes = _get_roots(
                     rootfn=self._get_root_function_mu(l=l),

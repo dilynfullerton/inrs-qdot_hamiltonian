@@ -5,6 +5,7 @@ import itertools as it
 from matplotlib import pyplot as plt
 from matplotlib import cm, colors
 from scipy import interpolate as interp
+from scipy import fftpack as fourier
 
 
 ModelConstants = namedtuple('ModelConstants', ['epsilon_0', 'e', 'hbar'])
@@ -76,14 +77,28 @@ ham = HamiltonianEPI(
     mu_round=MU_ROUND,
     large_R_approximation=LARGE_R,
     verbose_roots=True,
-    periodic_roots=True,
+    periodic_roots=False,
+    interp_roots=True,
     periodic_roots_start_dict=EXP_PERIODIC_START,
     expected_root_period_dict=EXP_ROOT_PERIOD,
 )
 
-XDAT = np.linspace(-5, 20, 1000)
-ham.plot_root_function_mu(l=0, xdat=XDAT)
+fig, ax = plt.subplots(2, 1)
+
+LX = 20
+XDAT = np.linspace(0, 0+LX, 10000)
+ydatr = ham.plot_root_function_mu(l=0, xdat=XDAT, fig=fig, ax=ax[0],
+                                  show=False)[0]
+
+fxdat = np.arange(len(ydatr)) / LX
+fydat = fourier.fft(ydatr)
+ax[1].plot(fxdat, np.real(fydat), '-', color='red')
+ax[1].plot(fxdat, np.imag(fydat), '-', color='blue')
+plt.show()
+
 ham.plot_root_function_mu(l=1, xdat=XDAT)
+
+assert False
 
 expect_mu = dict(EXP_MU)
 expect_period = dict(EXP_ROOT_PERIOD)
@@ -108,7 +123,8 @@ for R, i in zip(rdat, it.count()):
         mu_round=MU_ROUND,
         large_R_approximation=LARGE_R,
         verbose_roots=True,
-        periodic_roots=True,
+        periodic_roots=False,
+        interp_roots=True,
         periodic_roots_start_dict=EXP_PERIODIC_START,
         expected_root_period_dict=expect_period,
     )
