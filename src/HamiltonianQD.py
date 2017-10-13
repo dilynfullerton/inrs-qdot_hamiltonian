@@ -22,28 +22,74 @@ from matplotlib import mlab
 import itertools as it
 
 
-def _get_roots(rootfn, expected_roots, verbose=False):
+def _get_roots(rootfn, expected_roots, round_place=None, verbose=False):
     def fn(x):
         ans = rootfn(x[0] + 1j*x[1])
         return np.array([ans.real, ans.imag])
+    expected_roots = sorted(expected_roots, key=lambda x: abs(x))
     roots = []
-    print(expected_roots)
-    for x0 in expected_roots:
+    modes = []
+    if verbose:
+        print(expected_roots)
+    n = 0
+    for x0 in zip(expected_roots):
         result = opt.root(fun=fn, x0=np.array([x0.real, x0.imag]))
+        root = result.x[0]
+        if round_place is not None:
+            root = round(root, round_place)
         if not result.success and verbose:
             print('>>  FAIL: {}'.format(result.message))
-        else:
-            if verbose:
-                print('>>  SUCCESS')
-                print('      root: x={}'.format(result.x[0]))
+        elif root not in roots:
             roots.append(result.x[0])
+            modes.append(n)
+            n += 1
+            # if verbose:
+            #     print('>>  SUCCESS')
+            #     print('      root: x={}'.format(result.x[0]))
     if len(roots) < len(expected_roots) and verbose:
         print('>>  ERR: Found {} of {} expected roots'
               ''.format(len(roots), len(expected_roots)))
+    if verbose:
+        print('>> roots = {}'.format(roots))
+    return roots, modes
+
+
+def _get_roots_periodic(rootfn, expected_period, num_roots,
+                        round_place=None, x0=None, verbose=False,
+                        max_iter_per_root=10):
+    def fn(x):
+        ans = rootfn(x[0] + 1j * x[1])
+        ans = ans / abs(x[0])
+        return np.array([ans.real, ans.imag])
+    roots = []
+    modes = []
+    if x0 is None:
+        x0 = expected_period / 2 + 0.j
+    else:
+        x0 += expected_period / 2
+    x0 = complex(x0)
+    n = 0
+    for i in range(max_iter_per_root*num_roots):
+        if n >= num_roots:
+            break
+        result = opt.root(fun=fn, x0=np.array([x0.real, x0.imag]))
+        root = result.x[0]
+        if round_place is not None:
+            root = round(root, round_place)
+        if not result.success and verbose:
+            print('>>  FAIL: {}'.format(result.message))
+        elif root not in roots:
+            roots.append(result.x[0])
+            modes.append(n)
+            n += 1
+        if n >= num_roots:
+            break
+        else:
+            x0 += expected_period / 2
     roots = sorted(roots, key=lambda x: abs(x))
     if verbose:
         print('>> roots = {}'.format(roots))
-    return roots
+    return roots, modes
 
 
 def _plot_dispersion_function(xdat, rootfn, iterfn):
@@ -177,6 +223,10 @@ class HamiltonianEPI:
                  epsilon_0_qdot, epsilon_inf_qdot,
                  epsilon_inf_env, constants, beta_T, beta_L,
                  large_R_approximation=False,
+                 periodic_roots=False,
+                 periodic_roots_start_dict=None,
+                 expected_root_period_dict=None,
+                 num_roots=None,
                  verbose_roots=False, expected_mu_dict=None,
                  known_mu_dict=None, mu_round=None):
         self.r_0 = r_0
@@ -208,17 +258,31 @@ class HamiltonianEPI:
             2 * pi * self.const.e ** 2 * self.const.hbar * self.omega_L / self.V *
             (1/self.eps_a_inf - 1/self.eps_a_0)
         )
-        self._large_R = large_R_approximation
 
+        # Root finding
+        self._roots_mu = dict()  # (l, n) -> mu_ln
+        self._large_R = large_R_approximation
         self._mu_round = mu_round
-        self._expected_roots_mu = dict()
-        self._roots_mu = dict()
         self._verbose_roots = verbose_roots
+
+        self._periodic_roots = periodic_roots
+        self._expected_root_period = dict()
+        self._expected_num_roots = num_roots
+        self._periodic_roots_start = np.sqrt(
+            self.gamma * self.r_0**2 / self._beta_div2
+        )
+
+        self._expected_roots_mu = dict()
 
         if known_mu_dict is not None:
             self._roots_mu.update(known_mu_dict)
         if expected_mu_dict is not None:
             self._expected_roots_mu.update(expected_mu_dict)
+        if expected_root_period_dict is not None:
+            self._expected_root_period.update(expected_root_period_dict)
+
+        if self._expected_num_roots is None:
+            self._expected_num_roots = 2 * self.n_max + 1
 
         self._fill_roots_mu()
 
@@ -288,16 +352,19 @@ class HamiltonianEPI:
         return phifn
 
     def mu_nl(self, n, l):
-        if l not in self._expected_roots_mu:
-            return None
-        elif n > self.n_max:
+        # if l not in self._expected_roots_mu:
+        #     return None
+        # elif n > self.n_max:
+        if n > self.n_max:
             return None
         elif l not in self._roots_mu or len(self._roots_mu[l]) == 0:
             raise RuntimeError  # TODO
+            # return 0  # TODO get rid of this
         elif n >= len(self._roots_mu[l]):
             if self._verbose_roots:
                 print('>> No root found for l={} and n={}'.format(l, n))
             return None  # TODO
+            # return 0  # TODO get rid of this
         else:
             return self._roots_mu[l][n]
 
@@ -306,6 +373,15 @@ class HamiltonianEPI:
             return sorted(self._expected_roots_mu[l], key=lambda x: abs(x))
         else:
             return []
+
+    def _get_expected_root_period(self, l):
+        if l in self._expected_root_period:
+            return self._expected_root_period[l]
+        else:
+            return None
+
+    def _get_periodic_root_start(self):
+        return np.sqrt(self.gamma * self.r_0**2 / self._beta_div2)
 
     def _get_root_function_mu(self, l):
         def rootfn(mu):
@@ -328,6 +404,22 @@ class HamiltonianEPI:
         return rootfn
 
     def plot_root_function_mu(self, l, xdat, cplx=False):
+        # xdat = np.array(xdat)
+        # ydat_nu = np.empty(shape=xdat.shape, dtype=np.complex)
+        # ydat_dj_mu = np.empty(shape=xdat.shape, dtype=np.complex)
+        # ydat_dg_mu = np.empty(shape=xdat.shape, dtype=np.complex)
+        # ydat_Qinv2 = np.empty(shape=xdat.shape, dtype=np.complex)
+        # for x, i in zip(xdat, it.count()):
+        #     ydat_nu[i] = self.nu(mu=x)
+        #     ydat_dj_mu[i] = _j(l, d=1)(x)
+        #     ydat_dg_mu[i] = _g(l, d=1)(x)
+        #     ydat_Qinv2[i] = 1 / self.Q(mu=x)**2
+        # fig, ax = plt.subplots(1, 1)
+        # for ydat, lab in [(ydat_nu, 'nu'), (ydat_dj_mu, 'dj'), (ydat_dg_mu, 'dg'), (ydat_Qinv2, '1/Q^2')]:
+        #     ax.plot(xdat, np.real(ydat), label=lab+' RE')
+        #     ax.plot(xdat, np.imag(ydat), label=lab+' IM')
+        # ax.legend()
+        # plt.show()
         if not cplx:
             return _plot_dispersion_function(
                 xdat=xdat, rootfn=self._get_root_function_mu(l=l),
@@ -431,14 +523,23 @@ class HamiltonianEPI:
     def _fill_roots_mu(self):
         for l in range(self.l_max + 1):
             # Get roots from expected
-            new_roots = _get_roots(
-                rootfn=self._get_root_function_mu(l=l),
-                expected_roots=self._get_expected_roots_mu(l=l),
-                verbose=self._verbose_roots
-            )
-            # Add known roots
-            if l in self._roots_mu:
-                new_roots.extend(self._roots_mu[l])
+            if self._periodic_roots:
+                if l in self._expected_root_period:
+                    new_roots, modes = _get_roots_periodic(
+                        rootfn=self._get_root_function_mu(l=l),
+                        expected_period=self._expected_root_period[l],
+                        num_roots=self._expected_num_roots,
+                        x0=self._periodic_roots_start*(1.+1.e-4),
+                        verbose=self._verbose_roots,
+                    )
+                else:
+                    new_roots, modes = [], []
+            else:
+                new_roots, modes = _get_roots(
+                    rootfn=self._get_root_function_mu(l=l),
+                    expected_roots=self._get_expected_roots_mu(l=l),
+                    verbose=self._verbose_roots
+                )
             # Round values
             if self._mu_round is not None:
                 new_roots = [round(r, self._mu_round) for r in new_roots]

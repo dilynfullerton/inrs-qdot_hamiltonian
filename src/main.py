@@ -38,10 +38,18 @@ EXP_MU_LARGE_R = {
     0: [4.5, 7.7, 10.9, 14.1, 17.2],
     1: [5.9, 9.2, 12.4, 15.6],
 }
+EXP_PERIODIC_START_LARGE_R = {
+    0: 4.5,
+    1: 5.9,
+}
+EXP_ROOT_PERIOD_LARGE_R = {
+    0: 3.25,
+    1: 3.25,
+}
 MU_ROUND = 6
 
 LMAX = 1
-NMODES = 5
+NMODES = 3
 NMAX = NMODES - 1
 LARGE_R = True
 if LARGE_R:
@@ -65,6 +73,9 @@ ham = HamiltonianEPI(
     mu_round=MU_ROUND,
     large_R_approximation=LARGE_R,
     verbose_roots=True,
+    periodic_roots=True,
+    periodic_roots_start_dict=EXP_PERIODIC_START_LARGE_R,
+    expected_root_period_dict=EXP_ROOT_PERIOD_LARGE_R,
 )
 
 XDAT = np.linspace(-5, 20, 1000)
@@ -72,6 +83,7 @@ ham.plot_root_function_mu(l=0, xdat=XDAT)
 ham.plot_root_function_mu(l=1, xdat=XDAT)
 
 expect_mu = dict(EXP_MU)
+expect_period = dict(EXP_ROOT_PERIOD_LARGE_R)
 rdat = np.linspace(R0, R1, 1001)
 wdats_l0 = [np.empty(shape=rdat.shape, dtype=complex) for i in range(NMAX + 1)]
 wdats_l1 = [np.empty(shape=rdat.shape, dtype=complex) for i in range(NMAX + 1)]
@@ -92,20 +104,27 @@ for R, i in zip(rdat, it.count()):
         known_mu_dict=KNOWN_MU,
         mu_round=MU_ROUND,
         large_R_approximation=LARGE_R,
-        verbose_roots=False
+        verbose_roots=True,
+        periodic_roots=True,
+        periodic_roots_start_dict=EXP_PERIODIC_START_LARGE_R,
+        expected_root_period_dict=expect_period,
     )
     print()
-    if i % 50 == 0:
-        ham.plot_root_function_mu(l=0, xdat=XDAT)
+    # if i % 200 == 0:
+        # ham.plot_root_function_mu(l=0, xdat=XDAT)
         # ham.plot_root_function_mu(l=1, xdat=XDAT)
     for omega_n, n in ham.iter_omega_n(l=0):
         wdats_l0[n][i] = omega_n
     for omega_n, n in ham.iter_omega_n(l=1):
         wdats_l1[n][i] = omega_n
-    expect_mu = {
-        0: [nu for nu, n in ham.iter_mu_n(l=0)],
-        1: [nu for nu, n in ham.iter_mu_n(l=1)],
-    }
+    # expect_period = {
+    #     0: ham.mu_nl(n=1, l=0) - ham.mu_nl(n=0, l=0),
+    #     1: ham.mu_nl(n=1, l=1) - ham.mu_nl(n=1, l=1),
+    # }
+    # expect_mu = {
+    #     0: [nu for nu, n in ham.iter_mu_n(l=0)],
+    #     1: [nu for nu, n in ham.iter_mu_n(l=1)],
+    # }
 
 print('Making plots...')
 
@@ -124,7 +143,7 @@ axes[1].axhline(ham.omega_F, ls='--', color='gray', alpha=.5)
 
 for wdat, mode in zip(wdats_l0, it.count()):
     axes[0].plot(rdat, np.real(wdat), '-',
-                 label='mu={:.2e}'.format(ham.mu_nl(n=mode, l=0)),
+                 label='n={:.2e}'.format(mode),
                  color=sm.to_rgba(mode))
     # axes[0].plot(rdat, np.imag(wdat), '-.',
     #              label='mu={}, Im'.format(ham.mu_nl(n=mode, l=0)),
@@ -132,7 +151,7 @@ for wdat, mode in zip(wdats_l0, it.count()):
 
 for wdat, mode in zip(wdats_l1, it.count()):
     axes[1].plot(rdat, np.real(wdat), '-',
-                 label='mu={:.2e}'.format(ham.mu_nl(n=mode, l=1)),
+                 label='={:.2e}'.format(mode),
                  color=sm.to_rgba(mode))
     # axes[1].plot(rdat, np.imag(wdat), '-.',
     #              label='mu={}, Im'.format(ham.mu_nl(n=mode, l=1)),
