@@ -5,14 +5,51 @@ the definitions in Riera
 import numpy as np
 import itertools as it
 from scipy import integrate as integ
-from HamiltonianQD import J, K
+from HamiltonianQD import J, K, Y_lm
+import qutip as qt
 
 
-BASIS_e_x = np.array([1, 0, 0])
-BASIS_e_y = np.array([0, 1, 0])
-BASIS_e_z = np.array([0, 0, 1])
-BASIS_e_p = 1/np.sqrt(2) * (BASIS_e_x + 1j * BASIS_e_y)
-BASIS_e_m = 1/np.sqrt(2) * (BASIS_e_x - 1j * BASIS_e_y)
+def _lc_tensor(a, b, c):
+    if a < b < c or b < c < a or c < a < b:
+        return 1
+    elif a < c < b or b < a < c or c < b < a:
+        return -1
+    else:
+        return 0
+
+
+# def _intsphere_Ylm(l, m):
+#     intfn = Y_lm(l, m)
+#     # TODO make sure this is right
+#     return integ.dblquad(
+#         func=intfn, a=0, b=2*np.pi, gfun=lambda x: 0, hfun=lambda x: np.pi
+#     )[0]
+#
+
+def basis_cartesian():
+    return np.eye(3, 3)
+
+
+def basis_pmz():
+    isq2 = 1/np.sqrt(2)
+    return np.array([[isq2,  1j*isq2, 0],
+                     [isq2, -1j*isq2, 0],
+                     [   0,        0, 1]])
+
+
+def basis_spherical(theta, phi):
+    xph = -np.sin(phi)
+    yph = np.cos(phi)
+    zph = 0
+    zr = np.cos(theta)
+    zth = -np.sin(theta)
+    xth = zr * yph
+    yth = zr * -xph
+    xr = -zth * yph
+    yr = -zth * -xph
+    return np.array([[xr, xth, xph],
+                     [yr, yth, yph],
+                     [zr, zth, zph]])
 
 
 def _dirac_delta(x, x0=0):
@@ -158,7 +195,7 @@ class Raman:
         else:
             raise RuntimeError  # TODO
 
-    def get_state(self, state, j):
+    def get_numbers(self, state, j):
         return 0  # TODO
 
     def matelt_Hjs(self, bra, ket, j, omega_s, e_s):
@@ -183,77 +220,103 @@ class RamanQD(Raman):
         self._const = constants
 
     def matelt_Hjl(self, bra, ket, j, omega_l, e_l):
-        n1i, l1i, m1i = self.get_state(state=ket, j=1)
-        n2i, l2i, m2i = self.get_state(state=ket, j=2)
-        n1f, l1f, m1f = self.get_state(state=bra, j=1)
-        n2f, l2f, m2f = self.get_state(state=bra, j=2)
-        if j == 1 and l1f == l2i and m1f == m2i:
-            t0 = self.T(l=l1f, na=n1f, nb=n2i, nu=1/2)
-        elif j == 2 and l1i == l2f and m1i == m2f:
-            t0 = self.T(l=l2f, na=n2f, nb=n1i, nu=1/2)
-        else:
-            return 0
-        t1 = (
-            abs(self._const.e) / self._mu(0) *
-            np.sqrt(2*np.pi / self.V / omega_l) *
-            np.dot(e_l, self._p_cv(0))
+        return self._get_matelt(
+            j=j,
+            H=self.get_Hj(
+                j=j,
+                mu_i=self._mu(j=j),  # TODO
+                omega_i=omega_l, e_i=e_l),
+            bra=bra, ket=ket
         )
-        return t0 * t1
 
     def matelt_Hjs(self, bra, ket, j, omega_s, e_s):
-        return sum(
-            (self._matelt_Hjs_p(bra, ket, j=j, omega_s=omega_s, e_s=e_s, p=i)
-             for i in range(1, 4)),
-            0
+        return self._get_matelt(
+            j=j,
+            H=self.get_Hj(
+                j=j,
+                mu_i=self._mu(j=j),  # TODO
+                omega_i=omega_s, e_i=e_s),
+            bra=bra, ket=ket
         )
 
-    def _matelt_Hjs_p(self, bra, ket, j, omega_s, e_s, p):
-        ni, li, mi = self.get_state(ket, j=j)
-        nf, lf, mf = self.get_state(bra, j=j)
-        if p == 1 and mf == mi + 1:
-            t0 = np.dot(e_s, BASIS_e_p)
-        elif p == 2 and mf == mi - 1:
-            t0 = np.dot(e_s, BASIS_e_m)
-        elif p == 3 and mf == mi:
-            t0 = np.dot(e_s, BASIS_e_z)
-        else:
-            return 0
-        if lf == li + 1:
-            t1 = Pi(1, p, l=li, m=mi)
-        elif lf == li - 1:
-            t1 = Pi(2, p, l=li, m=mi)
-        else:
-            return 0
-        t2 = (
-            1j*(-1)**j * abs(self._const.e) / self.r_0 / self._mu(j=j) *
-            np.sqrt(2*np.pi / self.V / omega_s)
-        )
-        t3 = self.I(lf=lf, nf=nf, li=li, ni=ni)
-        return t0 * t1 * t2 * t3
-
-    def I(self, lf, nf, li, ni, nu=1/2):
+    def get_wavefunction(self, j, state, d_r=0):
+        l, m, n = self.get_numbers(state=state, j=j)
         r0 = self.r_0
-        xi = self.x(l=li, n=ni)
-        xf = self.x(l=lf, n=nf)
-        yi = self.y(l=li, n=ni)
-        yf = self.y(l=lf, n=nf)
-        Jli = J(l=li+nu)
-        Jlf = J(l=lf+nu)
-        Kli = K(l=li+nu)
-        Klf = K(l=lf+nu)
+        Ylm = Y_lm(l=l, m=m)
+        x = self.x(l=l, n=n, j=j)
+        y = self.y(l=l, n=n, j=j)
+        Aln = self.A(l=l, n=n, j=j)
+        Bln = self.B(l=l, n=n, j=j)
 
-        def ifn_j(r):
-            return Jli(z=xi*r/r0) * Jlf(z=xf*r/r0) * r
-        ans_j = integ.quad(ifn_j, a=0, b=self.r_0)[0]
+        def psifn(r, theta, phi):
+            ylm = Ylm(theta=theta, phi=phi)
+            uj = self.u_j(j)(r=r)
+            duj = self.u_j(j)(r=r, d_r=1)
+            J0 = J(l=l+1/2)(z=x*r/r0)
+            dJ0 = J(l=l+1/2, d=1)(z=x*r/r0)
+            K0 = K(l=l+1/2)(z=y*r/r0)
+            dK0 = K(l=l+1/2, d=1)(z=y*r/r0)
+            if r <= r0:
+                t1 = Aln * J0
+                t3 = Aln * x * dJ0
+            else:
+                t1 = Bln * K0
+                t3 = Bln * y * dK0
+            if d_r == 0:  # No derivative
+                t0 = ylm * uj / np.sqrt(r)
+                return t0 * t1
+            elif d_r == 1:  # One derivative
+                t0 = ylm * (duj - uj / 2 / r**2) / np.sqrt(r)
+                t2 = ylm * uj / np.sqrt(r) / r0
+                return t0 * t1 + t2 * t3
+            else:
+                return 0  # TODO
+        return psifn
 
-        def ifn_k(r):
-            return Kli(z=yi*r/r0) * Klf(z=yf*r/r0) * r
-        ans_k = integ.quad(ifn_k, a=self.r_0, b=np.inf)[0]
+    def get_Hj(self, j, mu_i, omega_i, e_i):
+        def hj(state, r, theta, phi):
+            t0 = abs(self._const.e) / mu_i * np.sqrt(2*np.pi/self.V/omega_i)
+            r_unit = basis_spherical(theta=theta, phi=phi)[:, 0]
+            dr_psi = self.get_wavefunction(j=j, state=state, d_r=1)
+            t1 = np.dot(e_i, r_unit) * dr_psi
+            t2 = 1j/r
+            t3 = 0
+            for a, b, c in it.permutations(range(3), r=3):
+                eps = _lc_tensor(a, b, c)
+                wf = self.get_wavefunction(j=j, state=self._L(c)(state))
+                t3 += (
+                    eps * omega_i[a] * r_unit[b] * wf(r=r, theta=theta, phi=phi)
+                )
+            return t0 * (t1 + t2 * t3)
+        return hj
 
-        return (
-            self.A(l=li, n=ni) * self.A(l=lf, n=nf) * ans_j +
-            self.B(l=li, n=ni) * self.B(l=lf, n=nf) * ans_k
-        )
+    def _get_matelt(self, j, H, bra, ket):
+        psi = self.get_wavefunction(j, state=bra)
+
+        def intfn(r, theta, phi):
+            return r * np.sin(theta) * (
+                np.conj(psi(r=r, theta=theta, phi=phi)) *
+                H(state=ket, r=r, theta=theta, phi=phi)
+            )
+        return integ.nquad(
+            func=intfn, ranges=[(0, np.inf), (0, np.pi), (0, 2*np.pi)]
+        )[0]
+
+    def _L(self, i):
+        def lfun(state):
+            return 0  # TODO
+        return lfun
+
+    def x(self, l, n, j):
+        return 0  # TODO
+
+    def y(self, l, n, j):
+        return 0  # TODO
+
+    def u_j(self, r):
+        def ufn(r):
+            return 1  # TODO
+        return ufn
 
     def _mu(self, j):
         """Effective mass
@@ -265,26 +328,14 @@ class RamanQD(Raman):
         """
         return 0  # TODO
 
-    def _p_cv(self, x):
-        return np.zeros(3)  # TODO
-
-    def T(self, l, na, nb, nu):
-        return self.I(lf=l, nf=nb, li=l, ni=na, nu=nu)
-
-    def x(self, l, n):
-        return 0  # TODO
-
-    def y(self, l, n):
-        return 0  # TODO
-
-    def _Jl_Kl(self, l, n):
+    def _Jl_Kl(self, l, n, j):
         l = l+1/2
-        return J(l=l)(self.x(l=l, n=n)), K(l=l)(self.y(l=l, n=n))
+        return J(l=l)(self.x(l=l, n=n, j=j)), K(l=l)(self.y(l=l, n=n, j=j))
 
-    def A(self, l, n):
-        Jl, Kl = self._Jl_Kl(l=l, n=n)
+    def A(self, l, n, j):
+        Jl, Kl = self._Jl_Kl(l=l, n=n, j=j)
         return 1/np.sqrt(abs(Jl)**2 + (Jl/Kl)**2 * abs(Kl)**2)
 
-    def B(self, l, n):
-        Jl, Kl = self._Jl_Kl(l=l, n=n)
-        return Jl/Kl * self.A(l=l, n=n)
+    def B(self, l, n, j):
+        Jl, Kl = self._Jl_Kl(l=l, n=n, j=j)
+        return Jl/Kl * self.A(l=l, n=n, j=j)

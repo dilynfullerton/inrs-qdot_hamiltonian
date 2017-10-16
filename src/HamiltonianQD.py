@@ -187,7 +187,7 @@ def _plot_dispersion_function2d(xdat, ydat, rootfn, iterfn):
     return fig, ax
 
 
-def _get_Y_lm(l, m):
+def Y_lm(l, m):
     def yfn(theta, phi):
         return sp.sph_harm(m, l, phi, theta)
     return yfn
@@ -360,7 +360,7 @@ class HamiltonianEPI:
             h += (
                 self.r_0 * self.C_F * np.sqrt(4*pi/3) *
                 self._get_Phi_ln(l=l, n=n)(r=r) *
-                _get_Y_lm(l=l, m=m)(theta=theta, phi=phi) *
+                Y_lm(l=l, m=m)(theta=theta, phi=phi) *
                 (self._b(l=l, m=m, n=n) + self._b(l=l, m=m, n=n).dag())
             )
         return
