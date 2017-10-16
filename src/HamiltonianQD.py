@@ -193,11 +193,17 @@ def _get_Y_lm(l, m):
     return yfn
 
 
-def _J(l, d=0):
+def J(l, d=0):
     def fn_j(z):
         z = complex(z)
         return sp.jvp(v=l, z=z, n=d)
     return fn_j
+
+
+def K(l, d=0):
+    def fn_k(z):
+        z = complex(z)
+        return sp.kvp(v=l, z=z, n=d)
 
 
 def _spherical_bessel1(l, func, z, dz=0):
