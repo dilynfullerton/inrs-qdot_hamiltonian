@@ -19,6 +19,26 @@ def _dirac_delta(x, x0=0):
     return 0  # TODO
 
 
+def Pi(k, p, l, m):
+    if k == 1 and p == 1:
+        return -np.sqrt(
+            (l + m + 2) * (l + m + 1) / 2 / (2 * l + 1) / (2 * l + 3))
+    elif k == 1 and p == 2:
+        return -Pi(k=1, p=1, l=l, m=-m)
+    elif k == 1 and p == 3:
+        return np.sqrt(
+            (l + m + 1) * (l + m - 1) / (2 * l + 1) / (2 * l + 3)
+        )
+    elif k == 2 and p == 1:
+        return -Pi(k=1, p=1, l=l-1, m=-m-1)
+    elif k == 2 and p == 2:
+        return -Pi(k=2, p=1, l=l, m=-m)
+    elif k == 2 and p == 3:
+        return -Pi(k=1, p=3, l=l-1, m=m)
+    else:
+        raise RuntimeError
+
+
 class Raman:
     def __init__(self, V, energies, states, istate, fstates,
                  lifetimes_elec, lifetimes_hole, refidx_func=None):
@@ -163,26 +183,27 @@ class RamanQD(Raman):
         self._const = constants
 
     def matelt_Hjl(self, bra, ket, j, omega_l, e_l):
-        a = (
+        n1i, l1i, m1i = self.get_state(state=ket, j=1)
+        n2i, l2i, m2i = self.get_state(state=ket, j=2)
+        n1f, l1f, m1f = self.get_state(state=bra, j=1)
+        n2f, l2f, m2f = self.get_state(state=bra, j=2)
+        if j == 1 and l1f == l2i and m1f == m2i:
+            t0 = self.T(l=l1f, na=n1f, nb=n2i, nu=1/2)
+        elif j == 2 and l1i == l2f and m1i == m2f:
+            t0 = self.T(l=l2f, na=n2f, nb=n1i, nu=1/2)
+        else:
+            return 0
+        t1 = (
             abs(self._const.e) / self._mu(0) *
             np.sqrt(2*np.pi / self.V / omega_l) *
             np.dot(e_l, self._p_cv(0))
         )
-        del1_2 = self.l(1, 1) == self.l(2) and self.m(1, 1) == self.m(2)
-        del12_ = self.l(1) == self.l(2, 1) and self.m(1) == self.m(2, 1)
-        if j != 1 and j != 2:
-            raise RuntimeError  # TODO
-        elif j == 1 and del1_2:
-            return self.T(self.l(1, 1), self.n(1, 1), self.n(2), nu=1/2)
-        elif j == 2 and del12_:
-            return self.T(self.l(2, 1), self.n(2, 1), self.n(1), nu=1/2)
-        else:
-            raise RuntimeError
+        return t0 * t1
 
     def matelt_Hjs(self, bra, ket, j, omega_s, e_s):
         return sum(
             (self._matelt_Hjs_p(bra, ket, j=j, omega_s=omega_s, e_s=e_s, p=i)
-             for i in range(3)),
+             for i in range(1, 4)),
             0
         )
 
@@ -198,59 +219,57 @@ class RamanQD(Raman):
         else:
             return 0
         if lf == li + 1:
-            t1 = self.Pi(j, 1, p)
+            t1 = Pi(1, p, l=li, m=mi)
         elif lf == li - 1:
-            t1 = self.Pi(j, 2, p)
+            t1 = Pi(2, p, l=li, m=mi)
         else:
             return 0
         t2 = (
             1j*(-1)**j * abs(self._const.e) / self.r_0 / self._mu(j=j) *
             np.sqrt(2*np.pi / self.V / omega_s)
         )
-        t3 = self.I(lf, nf, li, ni)
+        t3 = self.I(lf=lf, nf=nf, li=li, ni=ni)
         return t0 * t1 * t2 * t3
 
-    def Pi(self, j, k, p):
-        return 0  # TODO
+    def I(self, lf, nf, li, ni, nu=1/2):
+        r0 = self.r_0
+        xi = self.x(l=li, n=ni)
+        xf = self.x(l=lf, n=nf)
+        yi = self.y(l=li, n=ni)
+        yf = self.y(l=lf, n=nf)
+        Jli = J(l=li+nu)
+        Jlf = J(l=lf+nu)
+        Kli = K(l=li+nu)
+        Klf = K(l=lf+nu)
 
-    def I(self, lf, nf, li, ni):
-        return 0  # TODO
+        def ifn_j(r):
+            return Jli(z=xi*r/r0) * Jlf(z=xf*r/r0) * r
+        ans_j = integ.quad(ifn_j, a=0, b=self.r_0)[0]
+
+        def ifn_k(r):
+            return Kli(z=yi*r/r0) * Klf(z=yf*r/r0) * r
+        ans_k = integ.quad(ifn_k, a=self.r_0, b=np.inf)[0]
+
+        return (
+            self.A(l=li, n=ni) * self.A(l=lf, n=nf) * ans_j +
+            self.B(l=li, n=ni) * self.B(l=lf, n=nf) * ans_k
+        )
 
     def _mu(self, j):
+        """Effective mass
+            j=0 : Surrounding medium
+            j=1 : Electron
+            j=2 : Hole
+        :param j: Labeling described above
+        :return: The effective mass of the medium, electron, or hole
+        """
         return 0  # TODO
 
     def _p_cv(self, x):
         return np.zeros(3)  # TODO
 
-    def l(self, j, p=0):
-        return 0  # TODO
-
-    def m(self, j, p=0):
-        return 0  # TODO
-
-    def n(self, j, p=0):
-        return 0  # TODO
-
-    def T(self, l, ja, jb, nu):
-        r0 = self.r_0
-        na = self.n(ja)
-        nb = self.n(jb)
-        xa = self.x(l=l, n=na)
-        xb = self.x(l=l, n=nb)
-        ya = self.y(l=l, n=na)
-        yb = self.y(l=l, n=nb)
-        Jl = J(l=l+nu)
-        Kl = K(l=l+nu)
-
-        def ifn_j(r):
-            return Jl(z=xa*r/r0) * Jl(l+nu, z=xb*r/r0) * r
-        ans_j = integ.quad(ifn_j, a=0, b=self.r_0)[0]
-
-        def ifn_k(r):
-            return Kl(z=ya*r/r0) * Kl(l+nu, z=yb*r/r0) * r
-        ans_k = integ.quad(ifn_k, a=self.r_0, b=np.inf)[0]
-
-        return self.A(ja) * self.A(jb) * ans_j + self.B(ja) * self.B(jb) * ans_k
+    def T(self, l, na, nb, nu):
+        return self.I(lf=l, nf=nb, li=l, ni=na, nu=nu)
 
     def x(self, l, n):
         return 0  # TODO
@@ -258,15 +277,14 @@ class RamanQD(Raman):
     def y(self, l, n):
         return 0  # TODO
 
-    def _Jl_Kl(self, j):
-        l = self.l(j)+1/2
-        n = self.n(j)
+    def _Jl_Kl(self, l, n):
+        l = l+1/2
         return J(l=l)(self.x(l=l, n=n)), K(l=l)(self.y(l=l, n=n))
 
-    def A(self, j):
-        Jl, Kl = self._Jl_Kl(j=j)
+    def A(self, l, n):
+        Jl, Kl = self._Jl_Kl(l=l, n=n)
         return 1/np.sqrt(abs(Jl)**2 + (Jl/Kl)**2 * abs(Kl)**2)
 
-    def B(self, j=None):
-        Jl, Kl = self._Jl_Kl(j=j)
-        return Jl/Kl * self.A(j=j)
+    def B(self, l, n):
+        Jl, Kl = self._Jl_Kl(l=l, n=n)
+        return Jl/Kl * self.A(l=l, n=n)
