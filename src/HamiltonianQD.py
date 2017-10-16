@@ -11,7 +11,7 @@ Centro de Investigación en Física, Universidad de Sonora, 83190 Hermosillo, 
 R. Rosas
 Departamento de Física, Universidad de Sonora, 83000 Hermosillo, Sonora, México
 """
-from math import pi
+from math import pi, factorial
 import qutip as qt
 import numpy as np
 from scipy import optimize as opt
@@ -22,10 +22,15 @@ from matplotlib import pyplot as plt
 import itertools as it
 
 
-def _get_roots(rootfn, expected_roots, round_place=None, verbose=False):
-    def fn(x):
-        ans = rootfn(x[0] + 1j*x[1])
+def _get_roots(fun, expected_roots, dfun=None, round_place=None, verbose=False):
+    def f(x):
+        ans = fun(x[0] + 1j*x[1])
         return np.array([ans.real, ans.imag])
+
+    def df(x):
+        ans = dfun(x)
+        return np.array([[ans.real, -ans.imag], [ans.imag, ans.real]])
+
     expected_roots = sorted(expected_roots, key=lambda x: abs(x))
     roots = []
     modes = []
@@ -34,7 +39,10 @@ def _get_roots(rootfn, expected_roots, round_place=None, verbose=False):
     n = 0
     for x0 in zip(expected_roots):
         x0 = complex(x0)
-        result = opt.root(fun=fn, x0=np.array([x0.real, x0.imag]))
+        if dfun is not None:
+            result = opt.root(fun=f, x0=np.array([x0.real, x0.imag]), jac=df)
+        else:
+            result = opt.root(fun=f, x0=np.array([x0.real, x0.imag]))
         root = result.x[0]
         if round_place is not None:
             root = round(root, round_place)
@@ -55,12 +63,17 @@ def _get_roots(rootfn, expected_roots, round_place=None, verbose=False):
     return roots, modes
 
 
-def _get_roots_periodic(rootfn, expected_period, num_roots,
+def _get_roots_periodic(fun, expected_period, num_roots, dfun=None,
                         round_place=None, x0=None, verbose=False,
                         max_iter_per_root=10):
-    def fn(x):
-        ans = rootfn(x[0] + 1j * x[1])
+    def f(x):
+        ans = fun(x[0] + 1j * x[1])
         return np.array([ans.real, ans.imag])
+
+    def df(x):
+        ans = dfun(x[0] + 1j * x[1])
+        return np.array([[ans.real, -ans.imag], [ans.imag, ans.real]])
+
     roots = []
     modes = []
     if x0 is None:
@@ -72,7 +85,10 @@ def _get_roots_periodic(rootfn, expected_period, num_roots,
     for i in range(max_iter_per_root*num_roots):
         if n >= num_roots:
             break
-        result = opt.root(fun=fn, x0=np.array([x0.real, x0.imag]))
+        if dfun is not None:
+            result = opt.root(fun=f, x0=np.array([x0.real, x0.imag]), jac=df)
+        else:
+            result = opt.root(fun=f, x0=np.array([x0.real, x0.imag]))
         root = result.x[0]
         if round_place is not None:
             root = round(root, round_place)
@@ -92,7 +108,7 @@ def _get_roots_periodic(rootfn, expected_period, num_roots,
 
 
 def _get_roots_interpolate(
-        rootfn, expected_period, num_roots, round_place=None, x0=None,
+        fun, expected_period, num_roots, round_place=None, x0=None, dfun=None,
         verbose=False, npts=1000,
 ):
     if x0 is None:
@@ -100,7 +116,7 @@ def _get_roots_interpolate(
     else:
         x0 += expected_period / 2
     xdat = np.linspace(x0, x0 + num_roots * expected_period, npts)
-    ydat = np.array([rootfn(x) for x in xdat])
+    ydat = np.array([fun(x) for x in xdat])
 
     print(xdat)
     print(ydat)
@@ -184,31 +200,34 @@ def _J(l, d=0):
     return fn_j
 
 
-def _spherical_bessel1(l, func, d=0):
-    def fn_spb(x):
-        x = complex(x)
-        if d == 0:
-            return func(n=l, z=x, derivative=False)
-        elif d == 1:
-            return func(n=l, z=x, derivative=True)
-        else:
-            raise RuntimeError  # TODO
-        # elif l == 0:
-        #     return -_spherical_bessel1(l=1, func=func, d=d-1)(x)
-        # else:
-        #     return (
-        #         _spherical_bessel1(l=l-1, func=func, d=d-1)(x) -
-        #         (l+1) / 2 * _spherical_bessel1(l=l, func=func, d=d-1)(x)
-        #     )
-    return fn_spb
+def _spherical_bessel1(l, func, z, dz=0):
+    z = complex(z)
+    if dz == 0:
+        return func(n=l, z=z)
+    elif l == 0:
+        return -_spherical_bessel1(l=1, func=func, z=z, dz=dz-1)
+    else:
+        k = dz - 1
+        jk = _spherical_bessel1(l=l-1, func=func, z=z, dz=k)
+        rest = 0
+        for m in range(k+1):
+            rest += (
+                (-1)**m * sp.factorial(m) * z**(-m-1) * sp.binom(k, m) *
+                _spherical_bessel1(l=l, func=func, z=z, dz=k-m)
+            )
+        return jk - (l + 1) * rest
 
 
 def _j(l, d=0):
-    return _spherical_bessel1(l=l, func=sp.spherical_jn, d=d)
+    def jz(z):
+        return _spherical_bessel1(l=l, func=sp.spherical_jn, z=z, dz=d)
+    return jz
 
 
 def _i(l, d=0):
-    return _spherical_bessel1(l=l, func=sp.spherical_in, d=d)
+    def iz(z):
+        return _spherical_bessel1(l=l, func=sp.spherical_in, z=z, dz=d)
+    return iz
 
 
 def _g(l, d=0):
@@ -363,16 +382,109 @@ class HamiltonianEPI:
         for mu, n in self.iter_mu_n(l):
             yield self.omega(mu=mu), n
 
-    def omega(self, mu):
-        return np.sqrt(
-            complex(self.omega_L2 - self.beta_L2 * self.q(mu=mu)**2)
-        )
+    def omega(self, mu, d_mu=0):
+        if d_mu == 0:
+            return np.sqrt(self._omega2(mu=mu))
+        elif d_mu == 1:
+            return 1/2/self.omega(mu=mu) * self._omega2(mu=mu, d_mu=1)
+        else:
+            raise RuntimeError
+
+    def _omega2(self, mu, d_mu=0):
+        if d_mu == 0:
+            return self.omega_L2 - self.beta_L2 * self._q2(mu=mu)
+        elif d_mu > 0:
+            return -self.beta_L2 * self._q2(mu=mu, d_mu=d_mu)
+        else:
+            raise RuntimeError
+
+    def Q(self, mu, d_mu=0):
+        if d_mu == 0:
+            return np.sqrt(self._Q2(mu=mu))
+        elif d_mu == 1:
+            return (
+                1/2/self.Q(mu=mu) * self._Q2(mu=mu, d_mu=1)
+            )
+        else:
+            raise RuntimeError  # TODO
+
+    def _Q2(self, mu, d_mu=0):
+        if d_mu == 0:
+            return (self.omega_T2 - self._omega2(mu=mu)) / self.beta_T2
+        elif d_mu > 0:
+            return -1/self.beta_T2 * self._omega2(mu=mu, d_mu=d_mu)
+        else:
+            raise RuntimeError  # TODO
+
+    def q(self, mu, d_mu=0):
+        if d_mu == 0:
+            return complex(mu / self.r_0)
+        elif d_mu == 1:
+            return complex(1 / self.r_0)
+        elif d_mu > 1:
+            return 0+0j
+        else:
+            raise RuntimeError  # TODO
+
+    def _q2(self, mu, d_mu=0):
+        if d_mu == 0:
+            return self.q(mu=mu)**2
+        elif d_mu == 1:
+            return 2 * self.q(mu=mu) * self.q(mu=mu, d_mu=1)
+        else:
+            raise RuntimeError  # TODO
+
+    def nu(self, mu, d_mu=0):
+        return self.r_0 * self.Q(mu=mu, d_mu=d_mu)
+
+    def _F_l(self, l, nu, d_nu=0):
+        r0 = self.r_0
+        g = _g(l)(nu)
+        dg = _g(l, d=1)(nu)
+        if d_nu == 0:
+            return (
+                self.gamma * (r0/nu)**2 * l * (nu * dg - l * g) +
+                (l + (l + 1) * self._eps_div) * (nu * dg - g)
+            )
+        elif d_nu == 1:
+            d2g = _g(l, d=2)(nu)
+            return (
+                self.gamma * r0**2 * l * (
+                    -2*nu**(-3) * (nu * dg - l * g) +
+                    nu**(-2) * (dg + nu * d2g - l * dg)
+                ) +
+                (l + (l + 1) * self._eps_div) * (dg + nu * d2g - dg)
+            )
+        else:
+            raise RuntimeError  # TODO
+
+    def _G_l(self, l, nu, d_nu=0):
+        r0 = self.r_0
+        dg = _g(l, d=1)(nu)
+        g = _g(l)(nu)
+        ediv = self._eps_div
+        ll = (l + (l + 1) * ediv)
+        if d_nu == 0:
+            return (
+                self.gamma * (r0/nu)**2 * ediv * -(nu * dg - l * g) +
+                ll * g
+            )
+        elif d_nu == 1:
+            d2g = _g(l, d=2)(nu)
+            return (
+                self.gamma * r0**2 * ediv * (
+                    2 / nu**3 * (nu * dg - l * g) -
+                    1 / nu**2 * (dg + nu * d2g - l * dg)
+                ) +
+                ll * dg
+            )
+        else:
+            raise RuntimeError
 
     def _get_Phi_ln(self, l, n):
         fact = np.sqrt(self.r_0) / self._norm_u(n=n, l=l)
         mu_n = self.mu_nl(n=n, l=l)
         ediv = self._eps_div
-
         def phifn(r):
             r0 = self.r_0
             if r <= r0:
@@ -430,14 +542,34 @@ class HamiltonianEPI:
                      (l + self._eps_div * (l + 1)))
                 )
             else:
-                Fl_nu = self._F_l(l=l)(nu=nu)
+                Fl_nu = self._F_l(l=l, nu=nu)
                 jl_mu = _j(l)(mu)
-                Gl_nu = self._G_l(l=l)(nu=nu)
+                Gl_nu = self._G_l(l=l, nu=nu)
                 return (
                     mu * dj_mu * Fl_nu -
                     l * (l + 1) * jl_mu * Gl_nu
                 )
         return rootfn
+
+    def _get_root_function_deriv(self, l):
+        def drootfn(mu):
+            nu = self.nu(mu=mu)
+            dnu = self.nu(mu=mu, d_mu=1)
+            j = _j(l=l)(mu)
+            dj = _j(l=l, d=1)(mu)
+            d2j = _j(l=l, d=2)(mu)
+            F = self._F_l(l=l, nu=nu)
+            dF = self._F_l(l=l, nu=nu, d_nu=1)
+            G = self._G_l(l=l, nu=nu)
+            dG = self._G_l(l=l, nu=nu, d_nu=1)
+            if not self._large_R:
+                return (
+                    j*F + mu*d2j*F + mu*dj*dnu*dF -
+                    l*(l+1) * (dj*G + j*dnu*dG)
+                )
+            else:
+                return 0  # TODO
+        return drootfn
 
     def plot_root_function_mu(self, l, xdat, cplx=False, fig=None, ax=None,
                               show=True):
@@ -451,49 +583,6 @@ class HamiltonianEPI:
                 xdat=xdat, ydat=xdat, rootfn=self._get_root_function_mu(l=l),
                 iterfn=self.iter_mu(l=l)
             )
-
-    def nu(self, Q=None, mu=None):
-        if Q is not None:
-            return Q * self.r_0
-        elif mu is not None:
-            return self.nu(Q=self.Q(mu=mu))
-        else:
-            raise RuntimeError  # TODO
-
-    def Q(self, omega2=None, omega=None, mu=None):
-        return np.sqrt(complex(self._Q2(omega2=omega2, omega=omega, mu=mu)))
-
-    def _Q2(self, omega2=None, omega=None, mu=None):
-        if omega2 is not None:
-            return (self.omega_T2 - omega2) / self.beta_T2
-        elif omega is not None:
-            return self._Q2(omega2=omega**2)
-        elif mu is not None:
-            return self._Q2(omega=self.omega(mu=mu))
-        else:
-            raise RuntimeError  # TODO
-
-    def q(self, mu):
-        return mu / self.r_0
-
-    def _F_l(self, l):
-        def ffn(nu):
-            return (
-                self.gamma * (self.r_0/nu)**2 * l *
-                (nu * _g(l, d=1)(nu) - l * _g(l)(nu)) +
-                (l + (l + 1) * self._eps_div) *
-                (nu * _g(l, d=1)(nu) - _g(l)(nu))
-            )
-        return ffn
-
-    def _G_l(self, l):
-        def gfn(nu):
-            return (
-                self.gamma * (self.r_0/nu)**2 * self._eps_div *
-                -(nu * _g(l, d=1)(nu) - l * _g(l)(nu)) +
-                (l + (l + 1) * self._eps_div) * _g(l)(nu)
-            )
-        return gfn
 
     def _norm_u(self, n, l):
         return np.sqrt(self._norm_u2(n=n, l=l))
@@ -547,7 +636,8 @@ class HamiltonianEPI:
             if self._periodic_roots:
                 if l in self._expected_root_period:
                     new_roots, modes = _get_roots_periodic(
-                        rootfn=self._get_root_function_mu(l=l),
+                        fun=self._get_root_function_mu(l=l),
+                        dfun=self._get_root_function_deriv(l=l),
                         expected_period=self._expected_root_period[l],
                         num_roots=self._expected_num_roots,
                         x0=self._get_periodic_root_start(l=l)*(1.+1.e-4),
@@ -558,16 +648,20 @@ class HamiltonianEPI:
             elif self._interp_roots:
                 if l in self._expected_root_period:
                     new_roots, modes = _get_roots_interpolate(
-                        rootfn=self._get_root_function_mu(l=l),
+                        fun=self._get_root_function_mu(l=l),
+                        dfun=self._get_root_function_deriv(l=l),
                         expected_period=self._expected_root_period[l],
                         num_roots=self._expected_num_roots,
                         x0=self._get_periodic_root_start(l=l)*(1.+1.e-4),
                         verbose=self._verbose_roots,
                         npts=self._num_points_interp
                     )
+                else:
+                    new_roots, modes = [], []
             else:
                 new_roots, modes = _get_roots(
-                    rootfn=self._get_root_function_mu(l=l),
+                    fun=self._get_root_function_mu(l=l),
+                    dfun=self._get_root_function_deriv(l=l),
                     expected_roots=self._get_expected_roots_mu(l=l),
                     verbose=self._verbose_roots
                 )
