@@ -9,11 +9,47 @@ from scipy import optimize as opt
 from HamiltonianQD import J, K
 
 
-BASIS_e_x = np.array([1, 0, 0])
-BASIS_e_y = np.array([0, 1, 0])
-BASIS_e_z = np.array([0, 0, 1])
-BASIS_e_p = 1/np.sqrt(2) * (BASIS_e_x + 1j * BASIS_e_y)
-BASIS_e_m = 1/np.sqrt(2) * (BASIS_e_x - 1j * BASIS_e_y)
+def _lc_tensor(a, b, c):
+    if a < b < c or b < c < a or c < a < b:
+        return 1
+    elif a < c < b or b < a < c or c < b < a:
+        return -1
+    else:
+        return 0
+
+
+# def _intsphere_Ylm(l, m):
+#     intfn = Y_lm(l, m)
+#     # TODO make sure this is right
+#     return integ.dblquad(
+#         func=intfn, a=0, b=2*np.pi, gfun=lambda x: 0, hfun=lambda x: np.pi
+#     )[0]
+#
+
+def basis_cartesian():
+    return np.eye(3, 3)
+
+
+def basis_pmz():
+    isq2 = 1/np.sqrt(2)
+    return np.array([[isq2,  1j*isq2, 0],
+                     [isq2, -1j*isq2, 0],
+                     [   0,        0, 1]])
+
+
+def basis_spherical(theta, phi):
+    xph = -np.sin(phi)
+    yph = np.cos(phi)
+    zph = 0
+    zr = np.cos(theta)
+    zth = -np.sin(theta)
+    xth = zr * yph
+    yth = zr * -xph
+    xr = -zth * yph
+    yr = -zth * -xph
+    return np.array([[xr, xth, xph],
+                     [yr, yth, yph],
+                     [zr, zth, zph]])
 
 
 def _dirac_delta(x, x0=0):
@@ -159,7 +195,7 @@ class Raman:
         else:
             raise RuntimeError  # TODO
 
-    def get_state(self, state, j):
+    def get_numbers(self, state, j):
         return 0  # TODO
 
     def matelt_Hjs(self, bra, ket, j, omega_s, e_s):
