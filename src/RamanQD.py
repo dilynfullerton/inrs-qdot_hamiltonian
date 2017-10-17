@@ -177,7 +177,6 @@ class RamanQD:
         self.sigma_0 = 0  # TODO
         self.E_0 = 0  # TODO
         self.delta_f = 0  # TODO
-        self.S_0 = 0  # TODO
         self.g = 0  # TODO
         self.beta_1 = 0  # TODO
         self.r_0 = 0  # TODO
@@ -195,7 +194,7 @@ class RamanQD:
                 M12 = self.Mj(1, 2, estate=se, hstate=sh, omega_s=omega_s)
                 M21 = self.Mj(2, 1, estate=se, hstate=sh, omega_s=omega_s)
                 M22 = self.Mj(2, 2, estate=se, hstate=sh, omega_s=omega_s)
-                t2 = self.S_0 / (self.g**4 + self.delta_f**2)
+                t2 = self.S(0) / (self.g**4 + self.delta_f**2)
                 t1 += t2 * (
                     M11.real * M22.real + M12.real * M21.real +
                     M11.imag * M22.imag + M12.imag * M21.imag
