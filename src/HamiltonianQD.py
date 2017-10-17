@@ -133,8 +133,8 @@ def _get_roots_interpolate(
     return sorted(list(roots)), list(range(len(roots)))
 
 
-def _plot_dispersion_function(xdat, rootfn, iterfn, fig=None, ax=None,
-                              show=True):
+def plot_dispersion_function(xdat, rootfn, iterfn, fig=None, ax=None,
+                             show=True):
     if fig is None and ax is None:
         fig, ax = plt.subplots(1, 1)
     elif ax is None:
@@ -580,7 +580,7 @@ class HamiltonianEPI:
     def plot_root_function_mu(self, l, xdat, cplx=False, fig=None, ax=None,
                               show=True):
         if not cplx:
-            return _plot_dispersion_function(
+            return plot_dispersion_function(
                 xdat=xdat, rootfn=self._get_root_function_mu(l=l),
                 iterfn=self.iter_mu(l=l), fig=fig, ax=ax, show=show
             )

@@ -7,6 +7,9 @@ import itertools as it
 from scipy import integrate as integ
 from scipy import optimize as opt
 from HamiltonianQD import J, K
+from HamiltonianQD import plot_dispersion_function
+from matplotlib import pyplot as plt
+import qutip as qt
 
 
 def _lc_tensor(a, b, c):
@@ -18,14 +21,6 @@ def _lc_tensor(a, b, c):
         return 0
 
 
-# def _intsphere_Ylm(l, m):
-#     intfn = Y_lm(l, m)
-#     # TODO make sure this is right
-#     return integ.dblquad(
-#         func=intfn, a=0, b=2*np.pi, gfun=lambda x: 0, hfun=lambda x: np.pi
-#     )[0]
-#
-
 def basis_cartesian():
     return np.eye(3, 3)
 
@@ -34,7 +29,7 @@ def basis_pmz():
     isq2 = 1/np.sqrt(2)
     return np.array([[isq2,  1j*isq2, 0],
                      [isq2, -1j*isq2, 0],
-                     [   0,        0, 1]])
+                     [0,     0,       1]])
 
 
 def basis_spherical(theta, phi):
@@ -208,29 +203,126 @@ class Raman:
         raise NotImplementedError  # TODO
 
 
+class ModelSpaceElectronHolePair:
+    def __init__(self, num_n):
+        self.dim_n = num_n
+
+    def iter_states_SP(self, num_l):
+        for l, n in it.product(range(num_l), self.dim_n):
+            for m in range(-l, l+1):
+                yield (l, m, n), self.make_state_SP(l=l, m=m, n=n)
+
+    def iter_states_EHP(self, num_l, num_l2=None):
+        if num_l2 is None:
+            num_l2 = num_l
+        for l1, l2 in it.product(range(num_l), range(num_l2)):
+            for m1, m2 in it.product(range(-l1, l1+1), range(-l2, l2+1)):
+                for n1, n2 in it.product(self.dim_n, repeat=2):
+                    yield (
+                        (l1, m1, n1, l2, m2, n2),
+                        self.make_state_EHP(l1, m1, n1, l2, m2, n2)
+                    )
+
+    def make_state_SP(self, l, m, n):
+        """Make single-particle state
+        """
+        return qt.tensor(
+            qt.fock_dm(self.dim_n, n),
+            qt.spin_state(j=l, m=m, type='dm')
+        )
+
+    def make_state_EHP(self, l1, m1, n1, l2, m2, n2):
+        return qt.tensor(
+            self.make_state_SP(l1, m1, n1),
+            self.make_state_SP(l2, m2, n2)
+        )
+
+    def zero_SP(self, l):
+        return qt.qzero([self.dim_n, 2*l+1])
+
+    def zero_EHP(self, l1, l2):
+        return qt.tensor(self.zero_SP(l1), self.zero_SP(l2))
+
+    def one_SP(self, l):
+        return qt.qeye([self.dim_n, 2*l+1])
+
+    def one_EHP(self, l1, l2):
+        return qt.tensor(self.one_SP(l1), self.one_SP(l2))
+
+    def am_SP(self, l):
+        """Single particle annihilation operator
+        """
+        return qt.tensor(qt.destroy(self.dim_n), qt.qeye(2*l+1))
+
+    def am_EHP(self, j, l1, l2=None):
+        if j == 1:  # electron state
+            return qt.tensor(
+                self.am_SP(l1), self.one_SP(l1)
+            )
+        else:  # hole state
+            if l2 is None:
+                l2 = l1
+            return qt.tensor(
+                self.one_SP(l2), self.am_SP(l2)
+            )
+
+    def Lm_SP(self, l):
+        return qt.tensor(qt.qeye(self.dim_n), qt.spin_Jm(j=l))
+
+    def Lm_EHP(self, j, l1, l2=None):
+        if j == 1:  # electron state
+            return qt.tensor(
+                self.Lm_SP(l1), self.one_SP(l1)
+            )
+        else:  # hole state
+            if l2 is None:
+                l2 = l1
+            return qt.tensor(
+                self.one_SP(l2), self.Lm_SP(l2)
+            )
+
+
 class RamanQD:
     def __init__(self):
-        self.sigma_0 = 0  # TODO
-        self.E_0 = 0  # TODO
-        self.delta_f = 0  # TODO
-        self.g = 0  # TODO
-        self.beta_1 = 0  # TODO
+        self.const = None  # TODO
+        self.E_g = 0  # TODO
         self.r_0 = 0  # TODO
+        self.mu_r = 0  # TODO
+        self.V = 0  # TODO
+        self.Gamma_f = 0  # TODO
+        self.E_0 = 1 / 2 / self.mu_r / self.r_0**2  # Riera (151)
+        self.delta_f = self.Gamma_f / self.E_0  # Riera (152)
 
-    def cross_section(self, omega_s):
-        return sum(
-            (self._cross_section(omega_s=omega_s, p=p) for p in range(4)), 0)
+        self._num_l = 0  # TODO
+        self._num_n = 0  # TODO
+        self.ms = ModelSpaceElectronHolePair(num_n=self._num_n)
 
-    def _cross_section(self, omega_s, p):
-        t0 = 27/4 * self.sigma_0 * (omega_s/self.E_0)**2 * self.delta_f
+        self._x = dict()  # l, n, j -> x
+        self._y = dict()  # l, n, j -> y
+        self._expected_roots_x = dict()  # TODO
+        self._fill_roots_xy()
+
+    def cross_section(self, omega_l, e_l, omega_s, e_s):
+        cs = 0
+        for p in range(4):
+            cs += self._cross_section(omega_l=omega_l, e_l=e_l,
+                                      omega_s=omega_s, e_s=e_s, p=p)
+        return cs
+
+    def _cross_section(self, omega_l, e_l, omega_s, e_s, p):
+        t0 = (27/4 * self.sigma_0(omega_s=omega_s, omega_l=omega_l, e_l=e_l) *
+              (omega_s/self.E_0)**2 * self.delta_f)
         if p == 0:
             t1 = 0
-            for se, sh in it.product(self.estates(), self.hstates()):
+            for se, sh in it.product(self.states_SP(), repeat=2):
                 M11 = self.Mj(1, 1, estate=se, hstate=sh, omega_s=omega_s)
                 M12 = self.Mj(1, 2, estate=se, hstate=sh, omega_s=omega_s)
                 M21 = self.Mj(2, 1, estate=se, hstate=sh, omega_s=omega_s)
                 M22 = self.Mj(2, 2, estate=se, hstate=sh, omega_s=omega_s)
-                t2 = self.S(0) / (self.g**4 + self.delta_f**2)
+                g2 = self.g2(x1=self.x(j=1, state=se),
+                             x2=self.x(j=2, state=sh),
+                             omega_l=omega_l, omega_s=omega_s)
+                t2 = self.S(p=0, e_s=e_s) / (g2**2 + self.delta_f**2)
                 t1 += t2 * (
                     M11.real * M22.real + M12.real * M21.real +
                     M11.imag * M22.imag + M12.imag * M21.imag
@@ -238,27 +330,66 @@ class RamanQD:
             return t0 * t1
         else:
             t1 = 0
-            for se, sh in it.product(self.estates(), self.hstates()):
+            for se, sh in it.product(self.states_SP(), repeat=2):
                 M1p = self.Mj(1, p, estate=se, hstate=sh, omega_s=omega_s)
                 M2p = self.Mj(2, p, estate=se, hstate=sh, omega_s=omega_s)
-                t2 = self.S(p) / (self.g**4 + self.delta_f**2)
+                g2 = self.g2(x1=self.x(j=1, state=se),
+                             x2=self.x(j=2, state=sh),
+                             omega_l=omega_l, omega_s=omega_s)
+                t2 = self.S(p=p, e_s=e_s) / (g2**2 + self.delta_f**2)
                 t1 += abs(M1p + M2p)**2 * t2
             return t0 * t1
 
-    def S(self, p):
+    def S(self, p, e_s):
+        """Polarization S_p. See Riera (149)
+        """
+        pms = basis_pmz()
+        if p == 0:
+            return abs(np.dot(e_s, pms[:, 0])) * abs(np.dot(e_s, pms[:, 1]))
+        elif p == 1:
+            return abs(np.dot(e_s, pms[:, 0]))**2
+        elif p == 2:
+            return abs(np.dot(e_s, pms[:, 1]))**2
+        elif p == 3:
+            return abs(np.dot(e_s, pms[:, 2]))**2
+        else:
+            raise RuntimeError  # TODO
+
+    def g2(self, x1, x2, omega_l, omega_s):
+        """See Riera (150)
+        """
+        return (
+            (omega_l - self.E_g) / self.E_0 - omega_s / self.E_0 -
+            self.beta(1) * x1**2 - self.beta(2) * x2**2
+        )
+
+    def sigma_0(self, omega_s, omega_l, e_l):
+        """See Riera (104)
+        """
+        return (
+            (4*np.sqrt(2) * self.V * self.const.e**4 *
+             abs(np.dot(e_l, self.p_cv(0)))**2 * self.eta(omega_s) *
+             self.mu_r**(1/2) * self.E_0**(3/2)) /
+            (9*np.pi**2 * self.const.mu_0**2 * self.eta(omega_l) *
+             omega_l * omega_s)
+        )
+
+    def p_cv(self, x):
+        return np.array([0, 0, 0])  # TODO
+
+    def eta(self, omega):
+        """Returns the refractive index for the given frequency
+        """
         return 0  # TODO
 
-    def states(self, j):
-        return ()  # TODO
+    def states_SP(self):
+        return self.ms.iter_states_SP(num_l=self._num_l)
 
-    def estates(self):
-        return self.states(j=1)
-
-    def hstates(self):
-        return self.states(j=2)
+    def states_EHP(self):
+        return self.ms.iter_states_EHP(num_l=self._num_l)
 
     def get_numbers(self, state):
-        return 0, 0, 0  # TODO
+        return state[0]
 
     def Mj(self, j, p, estate, hstate, omega_s):
         l1i, m1i, n1i = self.get_numbers(state=estate)
@@ -266,7 +397,7 @@ class RamanQD:
         if j == 2:
             l1i, m1i, n1i, l2i, m2i, n2i = l2i, m2i, n2i, l1i, m1i, n1i
         t1 = 0
-        for festate in self.estates():
+        for festate in self.states_SP():
             l1f, m1f, n1f = self.get_numbers(state=festate)
             # Continue if zero (check delta functions)
             if m1f != m2i or l1f != l2i:
@@ -284,39 +415,102 @@ class RamanQD:
                 t11_num = Pi(2, p, l=l1i, m=m1i)  # TODO: verify correctness
             else:
                 continue
+            a = self.get_index(state=festate, j=j)  # TODO I have no idea if this is what 'a' means
             t11_denom = (
                 omega_s / self.E_0 + self.beta(j) *
                 (self.x(l=l1i, n=n1i, j=j)**2 - self.x(l=l1f, n=n1f, j=j)**2)
+                + 1j*self.Gamma(a, j)/self.E_0
             )
-            a = self.get_index(state=festate, j=j)  # TODO I have no idea if this is what 'a' means
-            if a == 1:
-                t11_denom += 1j
             t12 = (self.I(l1f, n1f, l1i, n1i, j=j) *
                    self.T(l1f, n1f, n2i, j=j, nu=1/2))
             t1 += t11_num / t11_denom * t12
         t0 = -self.beta(j)
         return complex(t0 * t1)
 
-    def x(self, l, n, j):
+    def Gamma(self, a, j):
         return 0  # TODO
 
+    def x(self, j, l=None, n=None, state=None):
+        if l is not None and n is not None and (l, j, j) in self._x:
+            return self._x[l, n, j]
+        elif state is not None:
+            l, m, n = self.get_numbers(state=state)
+            return self.x(j=j, l=l, n=n)
+        else:
+            raise RuntimeError  # TODO
+
     def y(self, l, n, j):
-        return 0  # TODO
+        if (l, j, j) in self._y:
+            return self._y[l, n, j]
+        else:
+            raise RuntimeError  # TODO
+
+    def _fill_roots_xy(self):
+        for j, l in it.product([1, 2], range(self._num_l)):
+            for root, n in zip(self._solve_roots_xy(l=l, j=j),
+                               range(self._num_n)):
+                x, y = root
+                assert not np.isnan(x)
+                assert not np.isnan(y)
+                self._x[l, n, j] = x
+                self._y[l, n, j] = y
 
     def _solve_roots_xy(self, l, j):
         fun, jac = self.get_rootf_rootdf_xy(l=l, j=j)
-        roots = []
-        for x0y0 in self.expected_roots_xy(l=l, j=j):
+        for x0y0, n in zip(self.expected_roots_xy(l=l, j=j)):
             assert opt.check_grad(func=fun, grad=jac, x0=x0y0)
             result = opt.root(fun=fun, jac=jac, x0=x0y0)
             if not result.success:
                 print('FAILED')  # TODO
             else:
-                roots.append(result.x)
-        return roots
+                yield result.x
+
+    def _y2(self, x2, j):
+        return (
+            2 * self.mu_0(j) * self.r_0**2 * self.V_j(j) -
+            self.mu_0(j) / self.mu_i(j) * x2
+        )
+
+    def plot_root_fn_x(self, l, j, xdat):
+        rootfn = self.get_rootf_rootdf_xy(l=l, j=j)[0]
+
+        def fpr(x):
+            y = np.sqrt(self._y2(x2=x**2, j=j))
+            return np.real(rootfn(np.array([x, y])))[0]
+
+        def fmr(x):
+            y = -np.sqrt(self._y2(x2=x**2, j=j))
+            return np.real(rootfn(np.array([x, y])))[0]
+
+        def fpi(x):
+            y = np.sqrt(self._y2(x2=x**2, j=j))
+            return np.imag(rootfn(np.array([x, y])))[0]
+
+        def fmi(x):
+            y = -np.sqrt(self._y2(x2=x**2, j=j))
+            return np.imag(rootfn(np.array([x, y])))[0]
+
+        def ix():
+            for n in range(self._num_n):
+                yield self.x(l, n, j)
+
+        fig, ax = plt.subplots(1, 1)
+        plot_dispersion_function(
+            xdat=xdat, rootfn=fpr, iterfn=ix, fig=fig, ax=ax, show=False)
+        plot_dispersion_function(
+            xdat=xdat, rootfn=fpi, iterfn=ix, fig=fig, ax=ax, show=False)
+        plot_dispersion_function(
+            xdat=xdat, rootfn=fmr, iterfn=ix, fig=fig, ax=ax, show=False)
+        plot_dispersion_function(
+            xdat=xdat, rootfn=fmi, iterfn=ix, fig=fig, ax=ax, show=False)
+        plt.show()
+        return fig, ax
 
     def expected_roots_xy(self, l, j):
-        return []  # TODO
+        for x0 in self._expected_roots_x[l, j]:
+            y0 = np.sqrt(self._y2(x2=x0**2, j=j))
+            yield np.array([x0, y0])
+            yield np.array([x0, -y0])
 
     def get_rootf_rootdf_xy(self, l, j):
         rf1 = self._get_rootf1(l=l, j=j)
@@ -401,7 +595,9 @@ class RamanQD:
         return 0  # TODO
 
     def beta(self, j):
-        return 0  # TODO
+        """See Riera (92)
+        """
+        return self.mu_r / self.mu_i(j)
 
     def get_index(self, state, j):
         return 0  # TODO
