@@ -144,6 +144,7 @@ def plot_dispersion_function(xdat, rootfn, iterfn, fig=None, ax=None,
     ydatr = np.array([rootfn(x) for x in xdat])
     # ydati = np.array([rootfn(1j * x) for x in xdat])
 
+    # ax.plot(xdat, np.real(ydatr), '-')
     ax.plot(xdat, np.real(ydatr), '-', color='red')
     # ax.plot(xdat, np.real(ydati), '-', color='blue')
 
@@ -204,6 +205,7 @@ def K(l, d=0):
     def fn_k(z):
         z = complex(z)
         return sp.kvp(v=l, z=z, n=d)
+    return fn_k
 
 
 def _spherical_bessel1(l, func, z, dz=0):
