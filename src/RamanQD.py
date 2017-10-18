@@ -6,6 +6,7 @@ import numpy as np
 import itertools as it
 from scipy import integrate as integ
 from scipy import optimize as opt
+from scipy import linalg as lin
 from HamiltonianQD import J, K
 from HamiltonianQD import plot_dispersion_function
 from matplotlib import pyplot as plt
@@ -45,10 +46,6 @@ def basis_spherical(theta, phi):
     return np.array([[xr, xth, xph],
                      [yr, yth, yph],
                      [zr, zth, zph]])
-
-
-def _dirac_delta(x, x0=0):
-    return 0  # TODO
 
 
 def Pi(k, p, l, m):
@@ -151,115 +148,80 @@ class ModelSpaceElectronHolePair:
 
 
 class RamanQD:
-    def __init__(self):
-        self.const = None  # TODO
-        self.E_g = 0  # TODO
-        self.r_0 = 0  # TODO
-        self.mu_r = 0  # TODO
-        self.V = 0  # TODO
-        self.Gamma_f = 0  # TODO
+    def __init__(self, nmax, lmax, constants, unit_cell, refidx, radius,
+                 V1, V2, E_g, mu_i1, mu_i2, mu_01, mu_02, mu_0,
+                 Gamma_f, Gamma_a1, Gamma_a2, expected_roots_x_lj):
+        self.const = constants
+        self.unit_cell = unit_cell
+        self.E_g = E_g  # Gap energy
+        self.r_0 = radius
+        self.V = 4/3 * np.pi * self.r_0**2  # QD Volume
+        self._V_j = [V1, V2]
+        self._mu_ij = [mu_i1, mu_i2]  # QDOT effective mass?
+        self._mu_0j = [mu_01, mu_02]  # Environment effective mass
+        self.mu_0 = mu_0  # Free electron mass
+        self._Gamma_aj = [Gamma_a1, Gamma_a2]
+        self.Gamma_f = Gamma_f
+        self.mu_r = 1/(1 / self.mu_ij(1) + 1 / self.mu_ij(2))  # Riera (92)
         self.E_0 = 1 / 2 / self.mu_r / self.r_0**2  # Riera (151)
         self.delta_f = self.Gamma_f / self.E_0  # Riera (152)
+        self.p_cv0 = self._get_p_cv0()
+        self.eta = refidx  # omega -> refractive index
 
-        self._num_l = 0  # TODO
-        self._num_n = 0  # TODO
+        self._num_l = nmax + 1
+        self._num_n = lmax + 1
         self.ms = ModelSpaceElectronHolePair(num_n=self._num_n)
 
         self._x = dict()  # l, n, j -> x
         self._y = dict()  # l, n, j -> y
-        self._expected_roots_x = dict()  # TODO
+        self._expected_roots_x = expected_roots_x_lj
         self._fill_roots_xy()
 
+    # -- Raman cross section --
     def cross_section(self, omega_l, e_l, omega_s, e_s):
+        """Differential Raman scattering cross section. See Riera (201).
+        Note: I have moved the calculation of sigma_0 (which occurs for
+        each p) into this equation, removing it from that for
+        cross_section_p, as this involves six integrals and so may be
+        computationally expensive
+        """
         cs = 0
         for p in range(4):
-            cs += self._cross_section(omega_l=omega_l, e_l=e_l,
-                                      omega_s=omega_s, e_s=e_s, p=p)
-        return cs
-
-    def _cross_section(self, omega_l, e_l, omega_s, e_s, p):
+            cs += self._cross_section_p(omega_l=omega_l, omega_s=omega_s,
+                                        e_s=e_s, p=p)
         t0 = (27/4 * self.sigma_0(omega_s=omega_s, omega_l=omega_l, e_l=e_l) *
               (omega_s/self.E_0)**2 * self.delta_f)
-        if p == 0:
-            t1 = 0
-            for se, sh in it.product(self.states_SP(), repeat=2):
+        return t0 * cs
+
+    def _cross_section_p(self, omega_l, omega_s, e_s, p):
+        """See Riera (202, 203). Note that the computation of the common
+        prefactor containing sigma_0, which is present in Riera (202, 203)
+        has been moved to cross_section to avoid multiple computations
+        """
+        t1 = 0
+        for se, sh in it.product(self.states_SP(), repeat=2):
+            g2 = self.g2(x1=self.x(j=1, state=se),
+                         x2=self.x(j=2, state=sh),
+                         omega_l=omega_l, omega_s=omega_s)
+            t2 = self.S(p=p, e_s=e_s) / (g2**2 + self.delta_f**2)
+            if p == 0:
                 M11 = self.Mj(1, 1, estate=se, hstate=sh, omega_s=omega_s)
                 M12 = self.Mj(1, 2, estate=se, hstate=sh, omega_s=omega_s)
                 M21 = self.Mj(2, 1, estate=se, hstate=sh, omega_s=omega_s)
                 M22 = self.Mj(2, 2, estate=se, hstate=sh, omega_s=omega_s)
-                g2 = self.g2(x1=self.x(j=1, state=se),
-                             x2=self.x(j=2, state=sh),
-                             omega_l=omega_l, omega_s=omega_s)
-                t2 = self.S(p=0, e_s=e_s) / (g2**2 + self.delta_f**2)
                 t1 += t2 * (
                     M11.real * M22.real + M12.real * M21.real +
                     M11.imag * M22.imag + M12.imag * M21.imag
                 )
-            return t0 * t1
-        else:
-            t1 = 0
-            for se, sh in it.product(self.states_SP(), repeat=2):
+            else:
                 M1p = self.Mj(1, p, estate=se, hstate=sh, omega_s=omega_s)
                 M2p = self.Mj(2, p, estate=se, hstate=sh, omega_s=omega_s)
-                g2 = self.g2(x1=self.x(j=1, state=se),
-                             x2=self.x(j=2, state=sh),
-                             omega_l=omega_l, omega_s=omega_s)
-                t2 = self.S(p=p, e_s=e_s) / (g2**2 + self.delta_f**2)
                 t1 += abs(M1p + M2p)**2 * t2
-            return t0 * t1
-
-    def S(self, p, e_s):
-        """Polarization S_p. See Riera (149)
-        """
-        pms = basis_pmz()
-        if p == 0:
-            return abs(np.dot(e_s, pms[:, 0])) * abs(np.dot(e_s, pms[:, 1]))
-        elif p == 1:
-            return abs(np.dot(e_s, pms[:, 0]))**2
-        elif p == 2:
-            return abs(np.dot(e_s, pms[:, 1]))**2
-        elif p == 3:
-            return abs(np.dot(e_s, pms[:, 2]))**2
-        else:
-            raise RuntimeError  # TODO
-
-    def g2(self, x1, x2, omega_l, omega_s):
-        """See Riera (150)
-        """
-        return (
-            (omega_l - self.E_g) / self.E_0 - omega_s / self.E_0 -
-            self.beta(1) * x1**2 - self.beta(2) * x2**2
-        )
-
-    def sigma_0(self, omega_s, omega_l, e_l):
-        """See Riera (104)
-        """
-        return (
-            (4*np.sqrt(2) * self.V * self.const.e**4 *
-             abs(np.dot(e_l, self.p_cv(0)))**2 * self.eta(omega_s) *
-             self.mu_r**(1/2) * self.E_0**(3/2)) /
-            (9*np.pi**2 * self.const.mu_0**2 * self.eta(omega_l) *
-             omega_l * omega_s)
-        )
-
-    def p_cv(self, x):
-        return np.array([0, 0, 0])  # TODO
-
-    def eta(self, omega):
-        """Returns the refractive index for the given frequency
-        """
-        return 0  # TODO
-
-    def states_SP(self):
-        return self.ms.iter_states_SP(num_l=self._num_l)
-
-    def states_EHP(self):
-        return self.ms.iter_states_EHP(num_l=self._num_l)
-
-    def get_numbers(self, state):
-        return state[0]
+        return t1
 
     def Mj(self, j, p, estate, hstate, omega_s):
+        """See Riera (204) and (205)
+        """
         l1i, m1i, n1i = self.get_numbers(state=estate)
         l2i, m2i, n2i = self.get_numbers(state=hstate)
         if j == 2:
@@ -283,11 +245,10 @@ class RamanQD:
                 t11_num = Pi(2, p, l=l1i, m=m1i)  # TODO: verify correctness
             else:
                 continue
-            a = self.get_index(state=festate, j=j)  # TODO I have no idea if this is what 'a' means
             t11_denom = (
                 omega_s / self.E_0 + self.beta(j) *
                 (self.x(l=l1i, n=n1i, j=j)**2 - self.x(l=l1f, n=n1f, j=j)**2)
-                + 1j*self.Gamma(a, j)/self.E_0
+                + 1j * self.Gamma_aj(j) / self.E_0
             )
             t12 = (self.I(l1f, n1f, l1i, n1i, j=j) *
                    self.T(l1f, n1f, n2i, j=j, nu=1/2))
@@ -295,9 +256,156 @@ class RamanQD:
         t0 = -self.beta(j)
         return complex(t0 * t1)
 
-    def Gamma(self, a, j):
-        return 0  # TODO
+    # -- States --
+    def states_SP(self):
+        return self.ms.iter_states_SP(num_l=self._num_l)
 
+    def states_EHP(self):
+        return self.ms.iter_states_EHP(num_l=self._num_l)
+
+    def get_numbers(self, state):
+        return state[0]
+
+    # -- Getters --
+    def S(self, p, e_s):
+        """Polarization S_p. See Riera (149)
+        """
+        pms = basis_pmz()
+        if p == 1:
+            return abs(np.dot(e_s, pms[:, 0]).sum())**2
+        elif p == 2:
+            return abs(np.dot(e_s, pms[:, 1]).sum())**2
+        elif p == 3:
+            return abs(np.dot(e_s, pms[:, 2]).sum())**2
+        else:  # p = 0
+            return (abs(np.dot(e_s, pms[:, 0]).sum()) *
+                    abs(np.dot(e_s, pms[:, 1]).sum()))
+
+    def g2(self, x1, x2, omega_l, omega_s):
+        """See Riera (150)
+        """
+        return (
+            (omega_l - self.E_g) / self.E_0 - omega_s / self.E_0 -
+            self.beta(1) * x1**2 - self.beta(2) * x2**2
+        )
+
+    def _get_p_cv0(self):
+        """Momentum between valence and conduction bands, at k=0.
+         See Riera (78).
+        """
+        # The unit cell is defined by 3 vectors: a1, a2, a3, which
+        # are the columns of...
+        a_matrix = self.unit_cell.a_matrix
+
+        # The function to integrate (in terms of the unit cell basis) is
+        def intfn(c1, c2, c3, i):
+            # Get position in cartesian basis
+            x = np.dot(a_matrix, np.array([c1, c2, c3]))
+            r = lin.norm(x, ord=2)
+            # Evaluate u1 and u2 at r
+            # TODO In Riera, this is written conj(u1'), but I don't know
+            # what the prime is for
+            u1_conj = np.conj(self.u_j(j=1)(r=r))
+            du2 = self.u_j(j=2)(r=r, d_r=1)
+            pu2 = x / r * du2
+            return (u1_conj * pu2)[i]
+
+        # Integrate real and imaginary parts separately
+        def ifnr(c1, c2, c3, xi):
+            return np.real(intfn(c1, c2, c3, i=xi))
+
+        def ifni(c1, c2, c3, xi):
+            return np.imag(intfn(c1, c2, c3, i=xi))
+
+        # The integral is performed over the unit cell volume, 0 to 1 in
+        # each coordinate
+        x_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=[0])[0]
+        x_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=[0])[0]
+        y_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=[1])[0]
+        y_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=[1])[0]
+        z_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=[2])[0]
+        z_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=[2])[0]
+        re = np.array([x_re, y_re, z_re])
+        im = np.array([x_im, y_im, z_im])
+        return re + 1j * im
+
+    def u_j(self, j):
+        """Bloch function. I have not found the definition for this in
+        Riera
+        """
+        def ujfn(r, d_r=0):
+            return 1  # TODO
+        return ujfn
+
+    def sigma_0(self, omega_s, omega_l, e_l):
+        """See Riera (104)
+        """
+        return (
+            (4*np.sqrt(2) * self.V * self.const.e**4 *
+             abs(np.dot(e_l, self.p_cv0).sum())**2 * self.eta(omega_s) *
+             self.mu_r**(1/2) * self.E_0**(3/2)) /
+            (9*np.pi**2 * self.mu_0**2 * self.eta(omega_l) *
+             omega_l * omega_s)
+        )
+
+    def Gamma_aj(self, j):
+        return self._Gamma_aj[j-1]
+
+    def V_j(self, j):
+        return self._V_j[j-1]
+
+    def mu_ij(self, j):
+        return self._mu_ij[j-1]
+
+    def mu_0j(self, j):
+        return self._mu_0j[j-1]
+
+    def beta(self, j):
+        """See Riera (92)
+        """
+        return self.mu_r / self.mu_ij(j)
+
+    # -- Coupling tensors --
+    def I(self, lf, nf, li, ni, j, nu=1/2):
+        r0 = self.r_0
+        xi = self.x(l=li, n=ni, j=j)
+        xf = self.x(l=lf, n=nf, j=j)
+        yi = self.y(l=li, n=ni, j=j)
+        yf = self.y(l=lf, n=nf, j=j)
+        Jli = J(l=li+nu)
+        Jlf = J(l=lf+nu)
+        Kli = K(l=li+nu)
+        Klf = K(l=lf+nu)
+
+        def ifn_j(r):
+            return Jli(z=xi*r/r0) * Jlf(z=xf*r/r0) * r
+        ans_j = integ.quad(ifn_j, a=0, b=self.r_0)[0]
+
+        def ifn_k(r):
+            return Kli(z=yi*r/r0) * Klf(z=yf*r/r0) * r
+        ans_k = integ.quad(ifn_k, a=self.r_0, b=np.inf)[0]
+
+        return (
+            self.A(l=li, n=ni, j=j) * self.A(l=lf, n=nf, j=j) * ans_j +
+            self.B(l=li, n=ni, j=j) * self.B(l=lf, n=nf, j=j) * ans_k
+        )
+
+    def T(self, l, na, nb, j, nu=1/2):
+        return self.I(lf=l, nf=nb, li=l, ni=na, j=j, nu=nu)
+
+    def _Jl_Kl(self, l, n, j):
+        l = l+1/2
+        return J(l=l)(self.x(l=l, n=n, j=j)), K(l=l)(self.y(l=l, n=n, j=j))
+
+    def A(self, l, n, j):
+        Jl, Kl = self._Jl_Kl(l=l, n=n, j=j)
+        return 1/np.sqrt(abs(Jl)**2 + (Jl/Kl)**2 * abs(Kl)**2)
+
+    def B(self, l, n, j):
+        Jl, Kl = self._Jl_Kl(l=l, n=n, j=j)
+        return Jl/Kl * self.A(l=l, n=n, j=j)
+
+    # -- Obtaining roots --
     def x(self, j, l=None, n=None, state=None):
         if l is not None and n is not None and (l, j, j) in self._x:
             return self._x[l, n, j]
@@ -335,8 +443,8 @@ class RamanQD:
 
     def _y2(self, x2, j):
         return (
-            2 * self.mu_0(j) * self.r_0**2 * self.V_j(j) -
-            self.mu_0(j) / self.mu_i(j) * x2
+            2 * self.mu_0j(j) * self.r_0 ** 2 * self.V_j(j) -
+            self.mu_0j(j) / self.mu_ij(j) * x2
         )
 
     def plot_root_fn_x(self, l, j, xdat):
@@ -403,8 +511,8 @@ class RamanQD:
 
     def _get_rootf1(self, l, j):
         l = l+1/2
-        mu0 = self.mu_0(j)
-        mui = self.mu_i(j)
+        mu0 = self.mu_0j(j)
+        mui = self.mu_ij(j)
 
         def rf1(x, y, partial_x=0, partial_y=0):
             if partial_x == 0 and partial_y == 0:
@@ -427,8 +535,8 @@ class RamanQD:
         return rf1
 
     def _get_rootf2(self, j):
-        mu0 = self.mu_0(j)
-        mui = self.mu_i(j)
+        mu0 = self.mu_0j(j)
+        mui = self.mu_ij(j)
         vj = self.V_j(j)
 
         def _fx2(x, deriv=0):
@@ -453,58 +561,3 @@ class RamanQD:
 
         return rf2
 
-    def V_j(self, j):
-        return 0  # TODO
-
-    def mu_0(self, j):
-        return 0  # TODO
-
-    def mu_i(self, j):
-        return 0  # TODO
-
-    def beta(self, j):
-        """See Riera (92)
-        """
-        return self.mu_r / self.mu_i(j)
-
-    def get_index(self, state, j):
-        return 0  # TODO
-
-    def I(self, lf, nf, li, ni, j, nu=1/2):
-        r0 = self.r_0
-        xi = self.x(l=li, n=ni, j=j)
-        xf = self.x(l=lf, n=nf, j=j)
-        yi = self.y(l=li, n=ni, j=j)
-        yf = self.y(l=lf, n=nf, j=j)
-        Jli = J(l=li+nu)
-        Jlf = J(l=lf+nu)
-        Kli = K(l=li+nu)
-        Klf = K(l=lf+nu)
-
-        def ifn_j(r):
-            return Jli(z=xi*r/r0) * Jlf(z=xf*r/r0) * r
-        ans_j = integ.quad(ifn_j, a=0, b=self.r_0)[0]
-
-        def ifn_k(r):
-            return Kli(z=yi*r/r0) * Klf(z=yf*r/r0) * r
-        ans_k = integ.quad(ifn_k, a=self.r_0, b=np.inf)[0]
-
-        return (
-            self.A(l=li, n=ni, j=j) * self.A(l=lf, n=nf, j=j) * ans_j +
-            self.B(l=li, n=ni, j=j) * self.B(l=lf, n=nf, j=j) * ans_k
-        )
-
-    def T(self, l, na, nb, j, nu=1/2):
-        return self.I(lf=l, nf=nb, li=l, ni=na, j=j, nu=nu)
-
-    def _Jl_Kl(self, l, n, j):
-        l = l+1/2
-        return J(l=l)(self.x(l=l, n=n, j=j)), K(l=l)(self.y(l=l, n=n, j=j))
-
-    def A(self, l, n, j):
-        Jl, Kl = self._Jl_Kl(l=l, n=n, j=j)
-        return 1/np.sqrt(abs(Jl)**2 + (Jl/Kl)**2 * abs(Kl)**2)
-
-    def B(self, l, n, j):
-        Jl, Kl = self._Jl_Kl(l=l, n=n, j=j)
-        return Jl/Kl * self.A(l=l, n=n, j=j)
