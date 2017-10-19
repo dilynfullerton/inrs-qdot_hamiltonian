@@ -11,15 +11,17 @@ Centro de Investigación en Física, Universidad de Sonora, 83190 Hermosillo, 
 R. Rosas
 Departamento de Física, Universidad de Sonora, 83000 Hermosillo, Sonora, México
 """
-from math import pi, factorial
-import qutip as qt
+import itertools as it
+from math import pi
+
 import numpy as np
-from scipy import optimize as opt
-from scipy import special as sp
+import qutip as qt
+from matplotlib import pyplot as plt
 from scipy import integrate as integ
 from scipy import interpolate as interp
-from matplotlib import pyplot as plt
-import itertools as it
+from scipy import optimize as opt
+
+from helper_functions import Y_lm, _j, _g
 
 
 def _get_roots(fun, expected_roots, dfun=None, round_place=None, verbose=False):
@@ -186,68 +188,6 @@ def _plot_dispersion_function2d(xdat, ydat, rootfn, iterfn):
     plt.show()
 
     return fig, ax
-
-
-def Y_lm(l, m):
-    def yfn(theta, phi):
-        return sp.sph_harm(m, l, phi, theta)
-    return yfn
-
-
-def J(l, d=0):
-    def fn_j(z):
-        z = complex(z)
-        return sp.jvp(v=l, z=z, n=d)
-    return fn_j
-
-
-def K(l, d=0):
-    def fn_k(z):
-        z = complex(z)
-        return sp.kvp(v=l, z=z, n=d)
-    return fn_k
-
-
-def _spherical_bessel1(l, func, z, dz=0):
-    z = complex(z)
-    if dz == 0:
-        return func(n=l, z=z)
-    elif l == 0:
-        return -_spherical_bessel1(l=1, func=func, z=z, dz=dz-1)
-    else:
-        k = dz - 1
-        jk = _spherical_bessel1(l=l-1, func=func, z=z, dz=k)
-        rest = 0
-        for m in range(k+1):
-            rest += (
-                (-1)**m * sp.factorial(m) * z**(-m-1) * sp.binom(k, m) *
-                _spherical_bessel1(l=l, func=func, z=z, dz=k-m)
-            )
-        return jk - (l + 1) * rest
-
-
-def _j(l, d=0):
-    def jz(z):
-        return _spherical_bessel1(l=l, func=sp.spherical_jn, z=z, dz=d)
-    return jz
-
-
-def _i(l, d=0):
-    def iz(z):
-        return _spherical_bessel1(l=l, func=sp.spherical_in, z=z, dz=d)
-    return iz
-
-
-def _g(l, d=0):
-    def fn_g(z):
-        z = complex(z)
-        if (z**2).real >= 0:
-            j = _j(l, d)(z)
-            return j
-        else:
-            i = _i(l, d)(z)
-            return i
-    return fn_g
 
 
 class ModelSpaceEPI:
@@ -497,14 +437,14 @@ class HamiltonianEPI:
             r0 = self.r_0
             if r <= r0:
                 return fact * (
-                    _j(l)(mu_n*r/r0) -
-                    (mu_n * _j(l, d=1)(mu_n) + (l+1) * ediv * _j(l)(mu_n)) /
-                    (l + (l + 1) * ediv) * (r/r0)**l
+                    _j(l)(mu_n * r / r0) -
+                    (mu_n * _j(l, d=1)(mu_n) + (l + 1) * ediv * _j(l)(mu_n)) /
+                    (l + (l + 1) * ediv) * (r/r0) ** l
                 )
             else:
                 return fact * (
                     -(mu_n * _j(l, d=1)(mu_n) + l * ediv * _j(l)(mu_n)) /
-                    (l + (l + 1) * ediv) * (r/r0)**l
+                    (l + (l + 1) * ediv) * (r/r0) ** l
                 )
         return phifn
 
@@ -606,15 +546,15 @@ class HamiltonianEPI:
         def ifn(r):
             return r**2 * (
                 (
-                    -mu0 * _j(l, d=1)(mu0*r) +
-                    l*(l+1)/r * pl * _g(l)(nu0*r) -
-                    tl * l/r0 * (r/r0)**(l-1)
+                    -mu0 * _j(l, d=1)(mu0 * r) +
+                    l * (l+1) / r * pl * _g(l)(nu0 * r) -
+                    tl * l / r0 * (r/r0) ** (l-1)
                 )**2 +
                 l * (l + 1) / r**2 *
                 (
-                    -_j(l)(mu0*r) + pl/l *
-                    (_g(l)(nu0*r) + nu0*r * _g(l, d=1)(nu0*r)) -
-                    tl * (r/r0)**l
+                    -_j(l)(mu0 * r) + pl / l *
+                    (_g(l)(nu0 * r) + nu0 * r * _g(l, d=1)(nu0 * r)) -
+                    tl * (r/r0) ** l
                 )**2
             )
         return integ.quad(func=ifn, a=0, b=self.r_0)[0]
@@ -633,8 +573,8 @@ class HamiltonianEPI:
         muk = mu
         ediv = self._eps_div
         return (
-            self.gamma * (self.r_0/self.nu(mu=muk))**2 *
-            (muk * _j(l, d=1)(mu) + (l+1)*ediv*_j(l)(mu)) /
+            self.gamma * (self.r_0/self.nu(mu=muk)) ** 2 *
+            (muk * _j(l, d=1)(mu) + (l + 1) * ediv * _j(l)(mu)) /
             (l + ediv*(l+1))
         )
 

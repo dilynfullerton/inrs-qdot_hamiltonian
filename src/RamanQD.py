@@ -7,7 +7,7 @@ import itertools as it
 from scipy import integrate as integ
 from scipy import optimize as opt
 from scipy import linalg as lin
-from HamiltonianQD import J, K
+from helper_functions import J, K
 from HamiltonianQD import plot_dispersion_function
 from matplotlib import pyplot as plt
 import qutip as qt
