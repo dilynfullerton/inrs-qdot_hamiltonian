@@ -192,31 +192,6 @@ def _plot_dispersion_function2d(xdat, ydat, rootfn, iterfn):
     return fig, ax
 
 
-class ModelSpaceEPI:
-    def __init__(self, nmax, nfock=2):
-        self.nmax = nmax
-        self.dim = 2 * self.nmax + 1
-        self.nfock = nfock
-
-    def vacuum(self):
-        return qt.tensor([qt.fock_dm(self.nfock, 0)] * self.dim)
-
-    def zero(self):
-        return qt.qzero([self.nfock] * self.dim)
-
-    def one(self):
-        return qt.qeye([self.nfock] * self.dim)
-
-    def b(self, n):
-        assert -self.nmax <= n <= self.nmax
-        if n < 0:
-            n = self.dim + n
-        ops = [qt.qeye(self.nfock)] * self.dim
-        ops.insert(n, qt.destroy(self.nfock))
-        ops.pop(n+1)
-        return qt.tensor(ops)
-
-
 class HamiltonianEPI:
     def __init__(self, r_0, omega_LO, l_max, max_n_modes,
                  epsilon_0_qdot, epsilon_inf_qdot,
@@ -226,23 +201,29 @@ class HamiltonianEPI:
                  periodic_roots_start_dict=None,
                  expected_root_period_dict=None,
                  num_roots=None,
-                 verbose_roots=False, expected_mu_dict=None,
+                 verbose=False, expected_roots_mu_l=None,
                  known_mu_dict=None, mu_round=None,
                  num_points_interp=1000):
-        self.r_0 = r_0
-        self.V = 4/3 * pi * self.r_0**3
+        # Model constants
         self.l_max = l_max
         self.n_max = max_n_modes - 1
-        self.ms = ModelSpaceEPI(nmax=self.n_max, nfock=2)
+        self._num_n = self.n_max + 1
+        self._num_l = self.l_max + 1
+
+        # Physical constants
         self.const = constants
+        self.r_0 = r_0
         self.eps_a_0 = epsilon_0_qdot
         self.eps_a_inf = epsilon_inf_qdot
         self.eps_b_inf = epsilon_inf_env
-        self._eps_div = self.eps_b_inf / self.eps_a_inf
         self.beta_L2 = beta_L**2
         self.beta_T2 = beta_T**2
-        self._beta_div2 = self.beta_L2 / self.beta_T2
         self.omega_L = omega_LO
+
+        # Derived physical constants
+        self.V = 4/3 * pi * self.r_0**3
+        self._eps_div = self.eps_b_inf / self.eps_a_inf
+        self._beta_div2 = self.beta_L2 / self.beta_T2
         self.omega_L2 = self.omega_L**2
         self.omega_T2 = self.omega_L2 * self.eps_a_inf / self.eps_a_0
         self.omega_T = np.sqrt(self.omega_T2)
@@ -260,41 +241,15 @@ class HamiltonianEPI:
         )
 
         # Root finding
-        self._roots_mu = dict()  # (l, n) -> mu_ln
+        self._roots_mu = dict()  # l, n -> mu
+        self._roots_nu = dict()  # l, n -> nu
+        self._expected_roots_mu = expected_roots_mu_l  # l -> mu0
         self._large_R = large_R_approximation
-        self._mu_round = mu_round
-        self._verbose_roots = verbose_roots
-
-        self._periodic_roots = periodic_roots
-        self._interp_roots = interp_roots
-        self._expected_root_period = dict()
-        self._expected_num_roots = num_roots
-        self._periodic_roots_start = periodic_roots_start_dict
-        self._num_points_interp = num_points_interp
-
-        # self._periodic_roots_start = np.sqrt(
-        #     self.gamma * self.r_0**2 / self._beta_div2
-        # )
-
-        self._expected_roots_mu = dict()
-
-        if known_mu_dict is not None:
-            self._roots_mu.update(known_mu_dict)
-        if expected_mu_dict is not None:
-            self._expected_roots_mu.update(expected_mu_dict)
-        if expected_root_period_dict is not None:
-            self._expected_root_period.update(expected_root_period_dict)
-        if self._periodic_roots_start is None:
-            for l in range(l_max + 1):
-                self._periodic_roots_start[l] = np.sqrt(
-                    self.gamma * self.r_0**2 / self._beta_div2
-                )
-
-        if self._expected_num_roots is None:
-            self._expected_num_roots = 2 * self.n_max + 1
-
         self._fill_roots_mu()
 
+        self._verbose = verbose
+
+    # -- Hamiltonian --
     def H_epi(self, r, theta, phi):
         """Electron-phonon interaction Hamiltonian at spherical coordinates
         (r, theta, phi). The definition is based on (Riera, Eq. 59).
@@ -591,7 +546,7 @@ class HamiltonianEPI:
                         expected_period=self._expected_root_period[l],
                         num_roots=self._expected_num_roots,
                         x0=self._get_periodic_root_start(l=l)*(1.+1.e-4),
-                        verbose=self._verbose_roots,
+                        verbose=self._verbose,
                     )
                 else:
                     new_roots, modes = [], []
@@ -603,7 +558,7 @@ class HamiltonianEPI:
                         expected_period=self._expected_root_period[l],
                         num_roots=self._expected_num_roots,
                         x0=self._get_periodic_root_start(l=l)*(1.+1.e-4),
-                        verbose=self._verbose_roots,
+                        verbose=self._verbose,
                         npts=self._num_points_interp
                     )
                 else:
@@ -613,7 +568,7 @@ class HamiltonianEPI:
                     fun=self._get_root_function_mu(l=l),
                     dfun=self._get_root_function_deriv(l=l),
                     expected_roots=self._get_expected_roots_mu(l=l),
-                    verbose=self._verbose_roots
+                    verbose=self._verbose
                 )
             # Sort and update
             for root, mode in zip(new_roots, modes):

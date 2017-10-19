@@ -209,7 +209,7 @@ class RamanQD:
         # Root finding
         self._x = dict()  # l, n, j -> x
         self._y = dict()  # l, n, j -> y
-        self._expected_roots_x = expected_roots_x_lj
+        self._expected_roots_x = expected_roots_x_lj  # l, j -> x0
         self._fill_roots_xy()
 
         # Matrix elements
