@@ -60,14 +60,14 @@ def Pi(k, p, l, m):
         return -Pi(k=1, p=1, l=l, m=-m)
     elif k == 1 and p == 3:
         return np.sqrt(
-            (l + m + 1) * (l + m - 1) / (2 * l + 1) / (2 * l + 3)
+            (l - m + 1) * (l + m + 1) / (2 * l + 1) / (2 * l + 3)
         )
     elif k == 2 and p == 1:
         return -Pi(k=1, p=1, l=l-1, m=-m-1)
     elif k == 2 and p == 2:
         return -Pi(k=2, p=1, l=l, m=-m)
     elif k == 2 and p == 3:
-        return -Pi(k=1, p=3, l=l-1, m=m)
+        return Pi(k=1, p=3, l=l-1, m=m)
     else:
         raise RuntimeError
 
@@ -80,7 +80,7 @@ class ModelSpaceElectronHolePair:
         self.dim_n = num_n
 
     def iter_states_SP(self, num_l):
-        for l, n in it.product(range(num_l), self.dim_n):
+        for l, n in it.product(range(num_l), range(self.dim_n)):
             for m in range(-l, l+1):
                 yield (l, m, n), self.make_state_SP(l=l, m=m, n=n)
 
@@ -158,7 +158,8 @@ class RamanQD:
     def __init__(self, nmax, lmax, unit_cell, refidx, radius,
                  V1, V2, E_g, mu_i1, mu_i2, mu_01, mu_02,
                  free_electron_mass, electron_charge,
-                 Gamma_f, Gamma_a1, Gamma_a2, expected_roots_x_lj):
+                 Gamma_f, Gamma_a1, Gamma_a2, expected_roots_x_lj,
+                 verbose=False):
         # Model constants
         self._num_n = nmax + 1
         self._num_l = lmax + 1
@@ -194,21 +195,38 @@ class RamanQD:
         self._expected_roots_x = expected_roots_x_lj
         self._fill_roots_xy()
 
+        # Matrix elements
+        self._m_jpeh = dict()
+
+        # Other
+        self.verbose = verbose
+
+    def _print(self, string):
+        if self.verbose:
+            print('  >> {}'.format(string))
+
     # -- Raman cross section --
     def cross_section(self, omega_l, e_l, omega_s, e_s):
         """Differential Raman scattering cross section. See Riera (201).
-        Note: I have moved the calculation of sigma_0 (which occurs for
-        each p) into this equation, removing it from that for
-        cross_section_p, as this involves six integrals and so may be
-        computationally expensive
+        Note: I have removed the factor of sigma_0 from this calculation.
+        If the user wants to see the true cross section, the same should
+        multilply the result of this function with that of 'sigma_0'
         """
+        self._print('Obtaining cross section for')
+        self._print('  omega_l = {}'.format(omega_l))
+        self._print('  omega_s = {}'.format(omega_s))
+        self._print('  e_l = {}'.format(e_l))
+        self._print('  e_s = {}'.format(e_s))
         cs = 0
         for p in range(4):
+            self._print('Calculating cross section for p = {}'.format(p))
             cs += self._cross_section_p(omega_l=omega_l, omega_s=omega_s,
                                         e_s=e_s, p=p)
-        t0 = (27/4 * self.sigma_0(omega_s=omega_s, omega_l=omega_l, e_l=e_l) *
-              (omega_s/self.E_0)**2 * self.delta_f)
-        return t0 * cs
+        t0 = (27/4 * (omega_s/self.E_0)**2 * self.delta_f)
+        ans = t0 * cs
+        self._print('Cross section = {}'.format(ans))
+        self._print('Done\n')
+        return ans
 
     def _cross_section_p(self, omega_l, omega_s, e_s, p):
         """See Riera (202, 203). Note that the computation of the common
@@ -239,11 +257,20 @@ class RamanQD:
     def Mj(self, j, p, estate, hstate, omega_s):
         """See Riera (204) and (205)
         """
-        l1i, m1i, n1i = self.get_numbers(state=estate)
-        l2i, m2i, n2i = self.get_numbers(state=hstate)
-        if j == 2:
-            l1i, m1i, n1i, l2i, m2i, n2i = l2i, m2i, n2i, l1i, m1i, n1i
-        t1 = 0
+        enums = self.get_numbers(state=estate)
+        hnums = self.get_numbers(state=hstate)
+        if (j, p, enums, hnums) in self._m_jpeh:
+            mm = 0
+            for num, denom in self._m_jpeh[j, p, enums, hnums]:
+                mm += num / (denom + omega_s/self.E_0)
+            return mm
+        if j == 1:
+            l1i, m1i, n1i = enums
+            l2i, m2i, n2i = hnums
+        else:
+            l1i, m1i, n1i = hnums
+            l2i, m2i, n2i = enums
+        fracs = list()
         for festate in self.states_SP():
             l1f, m1f, n1f = self.get_numbers(state=festate)
             # Continue if zero (check delta functions)
@@ -263,15 +290,15 @@ class RamanQD:
             else:
                 continue
             t11_denom = (
-                omega_s / self.E_0 + self.beta(j) *
+                self.beta(j) *
                 (self.x(l=l1i, n=n1i, j=j)**2 - self.x(l=l1f, n=n1f, j=j)**2)
                 + 1j * self.Gamma_aj(j) / self.E_0
             )
-            t12 = (self.I(l1f, n1f, l1i, n1i, j=j) *
-                   self.T(l1f, n1f, n2i, j=j, nu=1/2))
-            t1 += t11_num / t11_denom * t12
-        t0 = -self.beta(j)
-        return complex(t0 * t1)
+            t12 = -self.beta(j) * (self.I(l1f, n1f, l1i, n1i, j=j) *
+                                   self.T(l1f, n1f, n2i, j=j, nu=1/2))
+            fracs.append((t11_num * t12, t11_denom))
+        self._m_jpeh[j, p, enums, hnums] = fracs
+        return self.Mj(j=j, p=p, estate=estate, hstate=hstate, omega_s=omega_s)
 
     # -- States --
     def states_SP(self):
@@ -400,11 +427,15 @@ class RamanQD:
 
         def ifn_j(r):
             return Jli(z=xi*r/r0) * Jlf(z=xf*r/r0) * r
-        ans_j = integ.quad(ifn_j, a=0, b=self.r_0)[0]
+        ans_j_re = integ.quad(lambda x: ifn_j(x).real, a=0, b=self.r_0)[0]
+        ans_j_im = integ.quad(lambda x: ifn_j(x).imag, a=0, b=self.r_0)[0]
+        ans_j = ans_j_re + 1j * ans_j_im
 
         def ifn_k(r):
             return Kli(z=yi*r/r0) * Klf(z=yf*r/r0) * r
-        ans_k = integ.quad(ifn_k, a=self.r_0, b=np.inf)[0]
+        ans_k_re = integ.quad(lambda x: ifn_k(x).real, a=self.r_0, b=np.inf)[0]
+        ans_k_im = integ.quad(lambda x: ifn_k(x).imag, a=self.r_0, b=np.inf)[0]
+        ans_k = ans_k_re + 1j * ans_k_im
 
         return (
             self.A(l=li, n=ni, j=j) * self.A(l=lf, n=nf, j=j) * ans_j +
@@ -415,8 +446,8 @@ class RamanQD:
         return self.I(lf=l, nf=nb, li=l, ni=na, j=j, nu=nu)
 
     def _Jl_Kl(self, l, n, j):
-        l = l+1/2
-        return J(l=l)(self.x(l=l, n=n, j=j)), K(l=l)(self.y(l=l, n=n, j=j))
+        return (J(l=l+1/2)(self.x(l=l, n=n, j=j)),
+                K(l=l+1/2)(self.y(l=l, n=n, j=j)))
 
     def A(self, l, n, j):
         Jl, Kl = self._Jl_Kl(l=l, n=n, j=j)
@@ -514,7 +545,7 @@ class RamanQD:
         for n in range(self._num_n):
             try:
                 x = self.x(j=j, l=l, n=n)
-                ax.axvline(x, ls='--', color='green', lw=1, alpha=.5)
+                ax.axvline(x.real, ls='--', color='green', lw=1, alpha=.5)
             except RuntimeError:
                 print('crap')
 
