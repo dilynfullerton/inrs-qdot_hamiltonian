@@ -39,19 +39,19 @@ def _spherical_bessel1(l, func, z, dz=0):
         return jk - (l + 1) * rest
 
 
-def _j(l, d=0):
+def j_sph(l, d=0):
     def jz(z):
         return _spherical_bessel1(l=l, func=sp.spherical_jn, z=z, dz=d)
     return jz
 
 
-def _i(l, d=0):
+def i_sph(l, d=0):
     def iz(z):
         return _spherical_bessel1(l=l, func=sp.spherical_in, z=z, dz=d)
     return iz
 
 
-def _g(l, d=0):
+def g_sph(l, d=0):
     def fn_g(z):
         z = complex(z)
         if (z**2).real >= 0:

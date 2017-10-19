@@ -52,22 +52,37 @@ def basis_spherical(theta, phi):
                      [zr, zth, zph]])
 
 
-def Pi(k, p, l, m):
-    if k == 1 and p == 1:
+def threej(j1, j2, j, m1, m2, m):
+    return 0  # TODO
+
+
+def Lambda(lbj, mbj, lcj, mcj, la, ma):
+    return (
+        (-1)**(lbj % 2) *
+        np.sqrt((2*lbj+1)*(2*lcj+1)*(2*la+1)/4/np.pi) *
+        threej(lbj, la, lcj, -mbj, ma, mcj) *
+        threej(lbj, la, lcj, 0, 0, 0)
+    )
+
+
+def Pi(j, p, laj, maj):
+    if j == 1 and p == 1:
         return -np.sqrt(
-            (l + m + 2) * (l + m + 1) / 2 / (2 * l + 1) / (2 * l + 3))
-    elif k == 1 and p == 2:
-        return -Pi(k=1, p=1, l=l, m=-m)
-    elif k == 1 and p == 3:
-        return np.sqrt(
-            (l - m + 1) * (l + m + 1) / (2 * l + 1) / (2 * l + 3)
+            (laj + maj + 2) * (laj + maj + 1) /
+            2 / (2 * laj + 1) / (2 * laj + 3)
         )
-    elif k == 2 and p == 1:
-        return -Pi(k=1, p=1, l=l-1, m=-m-1)
-    elif k == 2 and p == 2:
-        return -Pi(k=2, p=1, l=l, m=-m)
-    elif k == 2 and p == 3:
-        return Pi(k=1, p=3, l=l-1, m=m)
+    elif j == 1 and p == 2:
+        return -Pi(j=1, p=1, laj=laj, maj=-maj)
+    elif j == 1 and p == 3:
+        return np.sqrt(
+            (laj - maj + 1) * (laj + maj + 1) / (2 * laj + 1) / (2 * laj + 3)
+        )
+    elif j == 2 and p == 1:
+        return -Pi(j=1, p=1, laj=laj-1, maj=-maj-1)
+    elif j == 2 and p == 2:
+        return -Pi(j=2, p=1, laj=laj, maj=-maj)
+    elif j == 2 and p == 3:
+        return Pi(j=1, p=3, laj=laj-1, maj=maj)
     else:
         raise RuntimeError
 
@@ -155,26 +170,27 @@ class ModelSpaceElectronHolePair:
 
 
 class RamanQD:
-    def __init__(self, nmax, lmax, unit_cell, refidx, radius,
+    def __init__(self, hamiltonian, nmax, lmax, unit_cell, refidx, radius,
                  V1, V2, E_g, mu_i1, mu_i2, mu_01, mu_02,
                  free_electron_mass, electron_charge,
-                 Gamma_f, Gamma_a1, Gamma_a2, expected_roots_x_lj,
-                 verbose=False):
+                 Gamma_f, Gamma_a1, Gamma_a2, Gamma_b1, Gamma_b2,
+                 expected_roots_x_lj, verbose=False):
         # Model constants
         self._num_n = nmax + 1
         self._num_l = lmax + 1
         self.ms = ModelSpaceElectronHolePair(num_n=self._num_n)
+        self.hamiltonian = hamiltonian
 
         # j-dependent physical constants
         self._V_j = [V1, V2]
         self._Gamma_aj = [Gamma_a1, Gamma_a2]
+        self._Gamma_bj = [Gamma_b1, Gamma_b2]
         self._mu_ij = [mu_i1, mu_i2]  # QDOT effective mass?
         self._mu_0j = [mu_01, mu_02]  # Environment effective mass
 
         # Physical constants
         self._a_matrix = unit_cell
         self.E_g = E_g  # Gap energy
-        self.r_0 = radius
         self.mu_0 = free_electron_mass  # Free electron mass
         self.e = abs(electron_charge)
         self.Gamma_f = Gamma_f
@@ -183,6 +199,7 @@ class RamanQD:
         self.eta = refidx  # omega -> refractive index
 
         # Derived physical constants
+        self.r_0 = self.hamiltonian.r_0
         self.mu_r = 1/(1 / self.mu_ij(1) + 1 / self.mu_ij(2))  # Riera (92)
         self.E_0 = 1 / 2 / self.mu_r / self.r_0**2  # Riera (151)
         self.delta_f = self.Gamma_f / self.E_0  # Riera (152)
@@ -196,7 +213,8 @@ class RamanQD:
         self._fill_roots_xy()
 
         # Matrix elements
-        self._m_jpeh = dict()
+        self._mat_elts = dict()
+        self._mat_elts_ph = dict()
 
         # Other
         self.verbose = verbose
@@ -206,11 +224,13 @@ class RamanQD:
             print('  >> {}'.format(string))
 
     # -- Raman cross section --
-    def cross_section(self, omega_l, e_l, omega_s, e_s):
-        """Differential Raman scattering cross section. See Riera (201).
-        Note: I have removed the factor of sigma_0 from this calculation.
-        If the user wants to see the true cross section, the same should
-        multilply the result of this function with that of 'sigma_0'
+    def cross_section(self, omega_l, e_l, omega_s, e_s, phonon_assist=False):
+        """Differential Raman scattering cross section. See Riera (201)
+        for Raman cross section or (215) for phonon-assisted tranistions.
+        Note: I have removed the factor of sigma_0 (or sigma_ph) from this
+        calculation. If the user wants to see the true cross section, the
+        same should multilply the result of this function with that of
+        'sigma_0' (or 'sigma_ph' for phonon-assist)
         """
         self._print('Obtaining cross section for')
         self._print('  omega_l = {}'.format(omega_l))
@@ -220,85 +240,211 @@ class RamanQD:
         cs = 0
         for p in range(4):
             self._print('Calculating cross section for p = {}'.format(p))
-            cs += self._cross_section_p(omega_l=omega_l, omega_s=omega_s,
-                                        e_s=e_s, p=p)
-        t0 = (27/4 * (omega_s/self.E_0)**2 * self.delta_f)
+            cs += self._cross_section_p(
+                omega_l=omega_l, omega_s=omega_s, e_s=e_s, p=p,
+                phonon_assist=phonon_assist
+            )
+        if not phonon_assist:
+            t0 = (27/4 * (omega_s/self.E_0)**2 * self.delta_f)
+        else:
+            t0 = 8/3 * (omega_s/self.E_0)**2 * self.delta_f
         ans = t0 * cs
         self._print('Cross section = {}'.format(ans))
         self._print('Done\n')
         return ans
 
-    def _cross_section_p(self, omega_l, omega_s, e_s, p):
-        """See Riera (202, 203). Note that the computation of the common
-        prefactor containing sigma_0, which is present in Riera (202, 203)
-        has been moved to cross_section to avoid multiple computations
+    def _cross_section_p(self, omega_l, omega_s, e_s, p, phonon_assist=False,
+                         omega_q=None):
+        """See Riera (202, 203) [(216, 217) for phonon-assist]. Note that
+        the computation of the common prefactor containing sigma_0, which is
+        present in Riera (202, 203) has been moved to cross_section to
+        avoid multiple computations
+        """
+        if not phonon_assist:
+            return self._cross_section_p_reg(omega_l=omega_l, omega_s=omega_s,
+                                             e_s=e_s, p=p)
+        else:
+            return self._cross_section_p_phonon(
+                omega_l=omega_l, omega_s=omega_s, omega_q=omega_q,
+                e_s=e_s, p=p)
+
+    def _cross_section_p_phonon(self, omega_l, omega_s, e_s, omega_q, p):
+        t1 = 0
+        for s, s1, s2 in it.product(self.states_SP(), repeat=3):
+            G2 = self.G2(omega_l=omega_l, omega_s=omega_s, omega_q=omega_q,
+                         xa1=self.x(j=1, state=s1), xa2=self.x(j=2, state=s2))
+            t2 = self.S(p=p, e_s=e_s) / (G2**2 + self.delta_f**2)
+            l, m, n = self.get_numbers(state=s)
+            if p == 0 and m == 0:
+                M11 = self.Mph_j(1, 1, states=[s, s1, s2],
+                                 omega_s=omega_s, omega_q=omega_q)
+                M12 = self.Mph_j(1, 2, states=[s, s1, s2],
+                                 omega_s=omega_s, omega_q=omega_q)
+                M21 = self.Mph_j(2, 1, states=[s, s1, s2],
+                                 omega_s=omega_s, omega_q=omega_q)
+                M22 = self.Mph_j(2, 2, states=[s, s1, s2],
+                                 omega_s=omega_s, omega_q=omega_q)
+                t1 += t2 * (
+                    M11.real * M22.real + M12.real * M21.real +
+                    M11.imag * M22.imag + M12.imag * M21.imag
+                )
+            elif p > 0:
+                M1p = self.Mph_j(1, p, states=[s, s1, s2],
+                                 omega_s=omega_s, omega_q=omega_q)
+                M2p = self.Mph_j(2, p, states=[s, s1, s2],
+                                 omega_s=omega_s, omega_q=omega_q)
+                t1 += abs(M1p + M2p)**2 * t2
+        return t1
+
+    def _cross_section_p_reg(self, omega_l, omega_s, e_s, p):
+        """See Riera (202, 203). Note that
+        the computation of the common prefactor containing sigma_0, which is
+        present in Riera (202, 203) has been moved to cross_section to
+        avoid multiple computations
         """
         t1 = 0
-        for se, sh in it.product(self.states_SP(), repeat=2):
-            g2 = self.g2(x1=self.x(j=1, state=se),
-                         x2=self.x(j=2, state=sh),
+        for s1, s2 in it.product(self.states_SP(), repeat=2):
+            g2 = self.g2(x1=self.x(j=1, state=s1), x2=self.x(j=2, state=s2),
                          omega_l=omega_l, omega_s=omega_s)
             t2 = self.S(p=p, e_s=e_s) / (g2**2 + self.delta_f**2)
             if p == 0:
-                M11 = self.Mj(1, 1, estate=se, hstate=sh, omega_s=omega_s)
-                M12 = self.Mj(1, 2, estate=se, hstate=sh, omega_s=omega_s)
-                M21 = self.Mj(2, 1, estate=se, hstate=sh, omega_s=omega_s)
-                M22 = self.Mj(2, 2, estate=se, hstate=sh, omega_s=omega_s)
+                M11 = self.Mj(1, 1, states=[s1, s2], omega_s=omega_s)
+                M12 = self.Mj(1, 2, states=[s1, s2], omega_s=omega_s)
+                M21 = self.Mj(2, 1, states=[s1, s2], omega_s=omega_s)
+                M22 = self.Mj(2, 2, states=[s1, s2], omega_s=omega_s)
                 t1 += t2 * (
                     M11.real * M22.real + M12.real * M21.real +
                     M11.imag * M22.imag + M12.imag * M21.imag
                 )
             else:
-                M1p = self.Mj(1, p, estate=se, hstate=sh, omega_s=omega_s)
-                M2p = self.Mj(2, p, estate=se, hstate=sh, omega_s=omega_s)
+                M1p = self.Mj(1, p, states=[s1, s2], omega_s=omega_s)
+                M2p = self.Mj(2, p, states=[s1, s2], omega_s=omega_s)
                 t1 += abs(M1p + M2p)**2 * t2
         return t1
 
-    def Mj(self, j, p, estate, hstate, omega_s):
-        """See Riera (204) and (205)
+    def Mph_j(self, j, p, states, omega_s, omega_q):
+        """See Riera (218, 219)
         """
-        enums = self.get_numbers(state=estate)
-        hnums = self.get_numbers(state=hstate)
-        if (j, p, enums, hnums) in self._m_jpeh:
+        anums0, anums1, anums2 = [self.get_numbers(s) for s in states]
+
+        # If stored in dict, use that
+        if (j, p, anums1, anums2) in self._mat_elts_ph:
             mm = 0
-            for num, denom in self._m_jpeh[j, p, enums, hnums]:
-                mm += num / (denom + omega_s/self.E_0)
+            fracs = self._mat_elts_ph[j, p, anums1, anums2]
+            for num1, denom1, num2, denom2 in fracs:
+                mm += (
+                    num1 / (denom1 + omega_s/self.E_0 + omega_q/self.E_0) *
+                    num2 / (denom2 + omega_s/self.E_0)
+                )
             return mm
-        if j == 1:
-            l1i, m1i, n1i = enums
-            l2i, m2i, n2i = hnums
         else:
-            l1i, m1i, n1i = hnums
-            l2i, m2i, n2i = enums
+            self._set_Mph_j(j=j, p=p,
+                            anums0=anums0, anums1=anums1, anums2=anums2)
+            return self.Mph_j(j=j, p=p, states=states,
+                              omega_s=omega_s, omega_q=omega_q)
+
+    def _set_Mph_j(self, j, p, anums0, anums1, anums2):
+        anums = [anums1, anums2]
+        j_ = j % 2 + 1
+        la, ma, na = anums0
+        laj, maj, naj = anums[j-1]
+        laj_, maj_, naj_ = anums[j_-1]
+        x2aj = self.x(j=j, l=laj, n=naj)**2
         fracs = list()
-        for festate in self.states_SP():
-            l1f, m1f, n1f = self.get_numbers(state=festate)
-            # Continue if zero (check delta functions)
-            if m1f != m2i or l1f != l2i:
+        for state_b in self.states_SP():
+            lbj, mbj, nbj = self.get_numbers(state_b)
+            # Check delta functions
+            if p == 1 and mbj != maj + 1:
                 continue
-            elif p == 1 and m1f != m1i + 1:
+            elif p == 2 and mbj != maj - 1:
                 continue
-            elif p == 2 and m1f != m1i - 1:
+            elif p == 3 and mbj != maj:
                 continue
-            elif p == 3 and m1f != m1i:
-                continue
-            # Evaluate terms
-            if l1f == l1i + 1:
-                t11_num = Pi(1, p, l=l1i, m=m1i)  # TODO: verify correctness
-            elif l1f == l1i - 1:
-                t11_num = Pi(2, p, l=l1i, m=m1i)  # TODO: verify correctness
+            # Get first numerator and second denominator
+            beta = self.beta(j)
+            if lbj == laj + 1:
+                first_numerator = beta * Pi(j, 1, laj=laj, maj=maj)
+            elif lbj == laj - 1:
+                first_numerator = beta * Pi(j, 2, laj=laj, maj=maj)
             else:
                 continue
-            t11_denom = (
-                self.beta(j) *
-                (self.x(l=l1i, n=n1i, j=j)**2 - self.x(l=l1f, n=n1f, j=j)**2)
+            x2bj = self.x(j=j, l=lbj, n=nbj)**2
+            second_denominator = (beta * (x2aj - x2bj) +
+                                  1j * self.Gamma_aj(j) / self.E_0)
+            for state_c in self.states_SP():
+                lcj, mcj, ncj = self.get_numbers(state_c)
+                # Check delta function
+                if lcj != laj_:
+                    continue
+                # Get first denominator and second numerator
+                x2cj = self.x(j=j, l=lcj, n=ncj)**2
+                first_denominator = (beta * (x2aj - x2cj) +
+                                     1j * self.Gamma_bj(j) / self.E_0)
+                second_numerator = (
+                    self.II(lbj, nbj, lcj, ncj, la, na, j=j) *
+                    Lambda(lbj, mbj, lcj, mcj, la, ma) *
+                    self.I(lbj, nbj, laj, naj, j=j) *
+                    self.T(lcj, ncj, naj_, j=j)
+                )
+                fracs.append(
+                    (first_numerator, first_denominator,
+                     second_numerator, second_denominator)
+                )
+        self._mat_elts_ph[j, p, anums[0], anums[1]] = fracs
+
+    def Mj(self, j, p, states, omega_s):
+        """See Riera (204) and (205)
+        """
+        anums1, anums2 = [self.get_numbers(s) for s in states]
+
+        # If stored in dict, use that
+        if (j, p, anums1, anums2) in self._mat_elts:
+            mm = 0
+            fracs = self._mat_elts[j, p, anums1, anums2]
+            for num, denom in fracs:
+                mm += num / (denom + omega_s/self.E_0)
+            return mm
+        else:
+            self._set_M_j(j=j, p=p, anums1=anums1, anums2=anums2)
+            return self.Mj(j=j, p=p, states=states, omega_s=omega_s)
+
+    def _set_M_j(self, j, p, anums1, anums2):
+        anums = [anums1, anums2]
+        # Calculate matrix element and store in dict
+        j_ = j % 2 + 1
+        laj, maj, naj = anums[j-1]
+        laj_, maj_, naj_ = anums[j_-1]
+        fracs = list()
+        for state_b in self.states_SP():
+            lbj, mbj, nbj = self.get_numbers(state_b)
+            # Check delta functions
+            if mbj != maj_ or lbj != laj_:
+                continue
+            elif p == 1 and mbj != maj + 1:
+                continue
+            elif p == 2 and mbj != maj - 1:
+                continue
+            elif p == 3 and mbj != maj:
+                continue
+            # Get numerator
+            if lbj == laj + 1:
+                numerator = Pi(j, 1, laj=laj, maj=maj)
+            elif lbj == laj - 1:
+                numerator = Pi(j, 2, laj=laj, maj=maj)
+            else:
+                continue
+            beta = self.beta(j)
+            numerator *= (
+                beta * self.I(lbj, nbj, laj, naj, j=j) *
+                self.T(lbj, nbj, naj_, j=j)
+            )
+            denominator = (
+                beta *
+                (self.x(j=j, l=laj, n=naj)**2 - self.x(j=j, l=lbj, n=nbj)**2)
                 + 1j * self.Gamma_aj(j) / self.E_0
             )
-            t12 = -self.beta(j) * (self.I(l1f, n1f, l1i, n1i, j=j) *
-                                   self.T(l1f, n1f, n2i, j=j, nu=1/2))
-            fracs.append((t11_num * t12, t11_denom))
-        self._m_jpeh[j, p, enums, hnums] = fracs
-        return self.Mj(j=j, p=p, estate=estate, hstate=hstate, omega_s=omega_s)
+            fracs.append((numerator, denominator))
+        self._mat_elts[j, p, anums1, anums2] = fracs
 
     # -- States --
     def states_SP(self):
@@ -331,6 +477,14 @@ class RamanQD:
         return (
             (omega_l - self.E_g) / self.E_0 - omega_s / self.E_0 -
             self.beta(1) * x1**2 - self.beta(2) * x2**2
+        )
+
+    def G2(self, xa1, xa2, omega_l, omega_s, omega_q):
+        """See Riera (166)
+        """
+        return (
+            self.g2(x1=xa1, x2=xa2, omega_l=omega_l, omega_s=omega_s) -
+            omega_q / self.E_0
         )
 
     def p_cv0(self):
@@ -399,6 +553,9 @@ class RamanQD:
     def Gamma_aj(self, j):
         return self._Gamma_aj[j-1]
 
+    def Gamma_bj(self, j):
+        return self._Gamma_bj[j-1]
+
     def V_j(self, j):
         return self._V_j[j-1]
 
@@ -414,48 +571,82 @@ class RamanQD:
         return self.mu_r / self.mu_ij(j)
 
     # -- Coupling tensors --
-    def I(self, lf, nf, li, ni, j, nu=1/2):
+    def I(self, lb, nb, la, na, j):
         r0 = self.r_0
-        xi = self.x(l=li, n=ni, j=j)
-        xf = self.x(l=lf, n=nf, j=j)
-        yi = self.y(l=li, n=ni, j=j)
-        yf = self.y(l=lf, n=nf, j=j)
-        Jli = J(l=li+nu)
-        Jlf = J(l=lf+nu)
-        Kli = K(l=li+nu)
-        Klf = K(l=lf+nu)
+
+        xa = self.x(l=la, n=na, j=j)
+        xb = self.x(l=lb, n=nb, j=j)
 
         def ifn_j(r):
-            return Jli(z=xi*r/r0) * Jlf(z=xf*r/r0) * r
+            return J(la+1/2)(z=xa*r/r0) * J(lb+1/2)(z=xb*r/r0) * r
         ans_j_re = integ.quad(lambda x: ifn_j(x).real, a=0, b=self.r_0)[0]
         ans_j_im = integ.quad(lambda x: ifn_j(x).imag, a=0, b=self.r_0)[0]
         ans_j = ans_j_re + 1j * ans_j_im
 
+        ya = self.y(l=la, n=na, j=j)
+        yb = self.y(l=lb, n=nb, j=j)
+
         def ifn_k(r):
-            return Kli(z=yi*r/r0) * Klf(z=yf*r/r0) * r
+            return K(la+1/2)(z=ya*r/r0) * K(lb+1/2)(z=yb*r/r0) * r
         ans_k_re = integ.quad(lambda x: ifn_k(x).real, a=self.r_0, b=np.inf)[0]
         ans_k_im = integ.quad(lambda x: ifn_k(x).imag, a=self.r_0, b=np.inf)[0]
         ans_k = ans_k_re + 1j * ans_k_im
 
-        return (
-            self.A(l=li, n=ni, j=j) * self.A(l=lf, n=nf, j=j) * ans_j +
-            self.B(l=li, n=ni, j=j) * self.B(l=lf, n=nf, j=j) * ans_k
-        )
+        Aa, Ba = self._A_B(l=la, n=na, j=j)
+        Ab, Bb = self._A_B(l=lb, n=nb, j=j)
+        return Aa * Ab * ans_j + Ba * Bb * ans_k
 
-    def T(self, l, na, nb, j, nu=1/2):
-        return self.I(lf=l, nf=nb, li=l, ni=na, j=j, nu=nu)
+    def T(self, l, na, nb, j):
+        """See Riera (134). Using nu=1/2 always.
+        """
+        return self.I(lb=l, nb=nb, la=l, na=na, j=j)
+
+    def II(self, lbj, nbj, lcj, ncj, la, na, j):
+        """See Riera (210). Note: In Riera (210), the 'y' given to K is
+        'x', but I don't think that is correct.
+        """
+        r0 = self.r_0
+        Phi_ln = self.hamiltonian.Phi_ln(l=la, n=na)
+
+        xb = self.x(l=lbj, n=nbj, j=j)
+        xc = self.x(l=lcj, n=ncj, j=j)
+
+        def ifnj(r):
+            return (
+                J(lbj+1/2)(xb * r / r0) * Phi_ln(r) *
+                J(lcj+1/2)(xc * r / r0) * r
+            )
+        resultj_re = integ.quad(lambda x: ifnj(x).real, 0, r0)[0]
+        resultj_im = integ.quad(lambda x: ifnj(x).imag, 0, r0)[0]
+        resultj = resultj_re + 1j * resultj_im
+
+        yb = self.y(l=lbj, n=nbj, j=j)
+        yc = self.y(l=lcj, n=ncj, j=j)
+
+        def ifnk(r):
+            return (
+                K(lbj+1/2)(yb * r / r0) * Phi_ln(r) *
+                K(lcj+1/2)(yc * r / r0) * r
+
+            )
+        # TODO: Should the upper bound here be 0 or inf?
+        resultk_re = integ.quad(lambda x: ifnk(x).real, r0, np.inf)[0]
+        resultk_im = integ.quad(lambda x: ifnk(x).imag, r0, np.inf)[0]
+        resultk = resultk_re + 1j * resultk_im
+
+        Ab, Bb = self._A_B(l=lbj, n=nbj, j=j)
+        Ac, Bc = self._A_B(l=lcj, n=ncj, j=j)
+        return Ab * Ac * resultj + Bb * Bc * resultk
 
     def _Jl_Kl(self, l, n, j):
         return (J(l=l+1/2)(self.x(l=l, n=n, j=j)),
                 K(l=l+1/2)(self.y(l=l, n=n, j=j)))
 
-    def A(self, l, n, j):
-        Jl, Kl = self._Jl_Kl(l=l, n=n, j=j)
-        return 1/np.sqrt(abs(Jl)**2 + (Jl/Kl)**2 * abs(Kl)**2)
-
-    def B(self, l, n, j):
-        Jl, Kl = self._Jl_Kl(l=l, n=n, j=j)
-        return Jl/Kl * self.A(l=l, n=n, j=j)
+    def _A_B(self, l, n, j):
+        Jln = J(l=l+1/2)(self.x(l=l, n=n, j=j))
+        Kln = K(l=l+1/2)(self.y(l=l, n=n, j=j))
+        denom = np.sqrt(Kln**2 * abs(Jln)**2 + Jln**2 * abs(Kln)**2)
+        return Kln / denom, Jln / denom
 
     # -- Obtaining roots --
     def x(self, j, l=None, n=None, state=None):

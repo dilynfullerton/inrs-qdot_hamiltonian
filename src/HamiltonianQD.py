@@ -21,7 +21,9 @@ from scipy import integrate as integ
 from scipy import interpolate as interp
 from scipy import optimize as opt
 
-from helper_functions import Y_lm, _j, _g
+from helper_functions import Y_lm
+from helper_functions import j_sph as _j
+from helper_functions import g_sph as _g
 
 
 def _get_roots(fun, expected_roots, dfun=None, round_place=None, verbose=False):
