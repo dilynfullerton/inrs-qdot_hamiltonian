@@ -61,8 +61,8 @@ class HamiltonianQD(RootSolverComplex2d):
         # NOTE: The following definition for gamma is different from gamma_0
         # of Riera
         self.gamma = (self.omega_L2 - self.omega_T2) / self.beta_T2
-        self.C_F = -np.sqrt(
-            2 * pi * self.electron_charge ** 2 * self.omega_L /
+        self.C_F = self.electron_charge * np.sqrt(  # Roca (44)
+            2 * pi * self.omega_L /
             self.V * (1/self.eps_a_inf - 1/self.eps_a_0)
         )
 
@@ -78,35 +78,35 @@ class HamiltonianQD(RootSolverComplex2d):
     # -- Hamiltonian --
     def H_epi(self, r, theta, phi):
         """Electron-phonon interaction Hamiltonian at spherical coordinates
-        (r, theta, phi). The definition is based on (Riera, Eq. 59).
+        (r, theta, phi). The definition is based on Roca (42)
         """
         h = 0
         for l, m, n in self.iter_lmn():
             h += (
-                self.r_0 * self.C_F * np.sqrt(4*pi/3) *
-                self.Phi_ln(l=l, n=n)(r=r) *
+                self.r_0 * self.C_F / self.mu_nl(n=n, l=l) * (2 * l + 1) *
+                1j**(l % 4) * np.sqrt(2 * pi) * self.Phi_ln(l=l, n=n)(r=r) *
                 Y_lm(l=l, m=m)(theta=theta, phi=phi) *
                 (self._b(l=l, m=m, n=n) + self._b(l=l, m=m, n=n).dag())
+                # TODO: Should b creation be at negative n?
             )
         return
 
     def Phi_ln(self, l, n):
-        fact = np.sqrt(self.r_0) / self._norm_u(n=n, l=l)
+        """See Roca (43)
+        """
         mu_n = self.mu_nl(n=n, l=l)
         ediv = self._eps_div
 
         def phifn(r):
             r0 = self.r_0
             if r <= r0:
-                return fact * (
-                    _j(l)(mu_n * r / r0) -
-                    (mu_n * _j(l, d=1)(mu_n) + (l + 1) * ediv * _j(l)(mu_n)) /
-                    (l + (l + 1) * ediv) * (r/r0) ** l
+                return (
+                    (mu_n * _j(l, d=1)(mu_n) + (l + 1) * ediv * _j(l)(mu_n)) *
+                    (r/r0)**l - (l + (l + 1) * ediv) * _j(l)(mu_n*r/r0)
                 )
             else:
-                return fact * (
-                    -(mu_n * _j(l, d=1)(mu_n) + l * ediv * _j(l)(mu_n)) /
-                    (l + (l + 1) * ediv) * (r/r0) ** l
+                return (
+                    (mu_n * _j(l, d=1)(mu_n) - l * _j(l)(mu_n)) / (r/r0)**(l+1)
                 )
         return phifn
 
