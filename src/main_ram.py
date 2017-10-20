@@ -15,32 +15,34 @@ GAMMA_A1 = ELECTRON_CHARGE / 100
 
 
 QD_GaAs_HAM = HamiltonianQD(
-    n_max=6,
-    l_max=1,
+    n_max=5,
+    l_max=4,
     r_0=2.0,  # [nm]
     omega_L=0.03782,  # [eV]
     omega_T=0.02951,  # [eV]
-    beta_L=5.04e3,
-    beta_T=1.58e3,
+    beta_L=0.62488,
+    beta_T=0.19590,
     electron_charge=ELECTRON_CHARGE,
     epsilon_inf_qdot=5.3,
     epsilon_inf_env=4.64,
     expected_roots_mu_l={
-        0: [.0000001, 1.35, 2.38, 3.39, 4.39, 4.49, 5.38],
-        1: [.0001, 1.62, 2.22, 2.90, 3.87, 4.86, 5.81],
-        2: [.0001, 2.06, 3.03, 3.61, 4.37, 5.33, 6.31],
-        3: [.0001, 2.50, 3.50, 4.50, 5.00, 5.80, 6.80],
-        4: [.0001, 2.75, 4.00, 4.90, 5.75, 6.30, 7.25],
+        0: [1.30, 2.30, 3.30, 4.31, 4.42],
+        1: [.0001, 1.55, 2.15, 2.83, 3.80, 4.79],
+        2: [.0001, 1.99, 2.95, 3.54, 4.30, 5.26],
+        3: [.0000001, 2.39, 3.45, 4.30, 4.90, 5.75],
+        4: [.0000001, 2.75, 3.88, 4.85, 5.65, 6.30],
     }
 )
 
 # Plot roots
-XDAT_MU = np.linspace(1e-6, 10, 1000)
-QD_GaAs_HAM.plot_root_function_mu(l=0, xdat=XDAT_MU, show=True)
-QD_GaAs_HAM.plot_root_function_mu(l=1, xdat=XDAT_MU, show=True)
+XDAT_MU = np.linspace(1e-6, 20, 10000)
+# QD_GaAs_HAM.plot_root_function_mu(l=0, xdat=XDAT_MU, show=True)
+# QD_GaAs_HAM.plot_root_function_mu(l=1, xdat=XDAT_MU, show=True)
 # QD_GaAs_HAM.plot_root_function_mu(l=2, xdat=XDAT_MU, show=True)
 # QD_GaAs_HAM.plot_root_function_mu(l=3, xdat=XDAT_MU, show=True)
 # QD_GaAs_HAM.plot_root_function_mu(l=4, xdat=XDAT_MU, show=True)
+
+# assert False
 
 # Plot Phi(r)
 XDAT_R = np.linspace(0, QD_GaAs_HAM.r_0, 1001)
@@ -92,28 +94,29 @@ QD_GaAs_RAMAN = RamanQD(
         (0, 2): [.001, 3.00, 5.94, 8.34],
         (1, 1): [.001, 3.96],
         (1, 2): [.001, 4.29, 7.27],
-        # (2, 1): [.001],
-        # (2, 2): [.001],
-        # (3, 1): [.001],
-        # (3, 2): [.001],
-        # (4, 1): [.001],
-        # (4, 2): [.001],
+        (2, 1): [.001],
+        (2, 2): [.001],
+        (3, 1): [.001],
+        (3, 2): [.001],
+        (4, 1): [.001],
+        (4, 2): [.001],
     },
     verbose=True,
 )
 
 # Plot x roots
-XDAT_X = np.linspace(1e-6, 21, 10000)
-QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=1, xdat=XDAT_X, show=True)
-QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=2, xdat=XDAT_X, show=True)
-QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=1, xdat=XDAT_X, show=True)
-QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=2, xdat=XDAT_X, show=True)
+XDAT_X = np.linspace(1e-6, 10, 10000)
+# QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=1, xdat=XDAT_X, show=True)
+# QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=2, xdat=XDAT_X, show=True)
+# QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=1, xdat=XDAT_X, show=True)
+# QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=2, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=2, j=1, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=2, j=2, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=3, j=1, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=3, j=2, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=4, j=1, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=4, j=2, xdat=XDAT_X, show=True)
+# assert False
 
 # Plot cross section
 e_l = np.array([1, 0, 0])  # incident polarization

@@ -653,7 +653,7 @@ class RamanQD(RootSolverComplex2d):
 
     def _y2(self, x2, j):
         return (
-            2 * self.mu_0j(j) * self.r_0 ** 2 * self.V_j(j) -
+            2 * self.mu_0j(j) * self.r_0**2 * self.V_j(j) -
             self.mu_0j(j) / self.mu_ij(j) * x2
         )
 

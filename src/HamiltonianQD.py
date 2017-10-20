@@ -65,6 +65,7 @@ class HamiltonianQD(RootSolverComplex2d):
             2 * pi * self.omega_L /
             self.V * (1/self.eps_a_inf - 1/self.eps_a_0)
         )
+        self.low_mu = self.r_0 / np.sqrt(self._beta_div2) * np.sqrt(self.gamma)
 
         # Root finding
         self._roots_mu = dict()  # l, n -> mu
@@ -245,6 +246,7 @@ class HamiltonianQD(RootSolverComplex2d):
         return np.sqrt(self._nu2(mu2=mu**2))
 
     def plot_root_function_mu(self, l, xdat, show=True):
+        mudat = xdat + self.low_mu
         fn = self._get_root_function(l=l)
 
         def rootfn(xy):
@@ -258,16 +260,16 @@ class HamiltonianQD(RootSolverComplex2d):
 
         fig, ax = plt.subplots(1, 1)
         ax.axhline(0, color='gray', lw=1, alpha=.5)
-        ax.axvline(0, color='gray', lw=1, alpha=.5)
 
         for n in range(self.num_n):
             try:
                 mu = self.mu_nl(l=l, n=n)
-                ax.axvline(mu.real, ls='--', color='green', lw=1, alpha=.5)
+                ax.axvline(mu.real-self.low_mu, ls='--', color='green',
+                           lw=1, alpha=.5)
             except RuntimeError:
                 print('crap')
 
-        ydat = np.array([fpr(x) for x in xdat])
+        ydat = np.array([fpr(x) for x in mudat])
         ydat /= lin.norm(ydat, ord=2)
         ax.plot(xdat, ydat, '-', color='red')
 
@@ -275,7 +277,7 @@ class HamiltonianQD(RootSolverComplex2d):
         # ylog /= lin.norm(ylog, ord=2)
         # ax.plot(xdat, ylog, '--', color='red')
 
-        ypr = np.real(np.sqrt([self._nu2(mu2=x**2) for x in xdat]))
+        ypr = np.real(np.sqrt([self._nu2(mu2=x**2) for x in mudat]))
         ypr /= lin.norm(ypr, ord=2)
         ax.plot(xdat, ypr, '-', color='blue')
         ax.plot(xdat, -ypr, '-', color='blue')
@@ -295,7 +297,7 @@ class HamiltonianQD(RootSolverComplex2d):
 
     def _get_expected_roots_xy(self, l, *args, **kwargs):
         for mu0 in self._expected_roots_mu[l]:
-            mu0 = complex(mu0)
+            mu0 = complex(mu0+self.low_mu)
             nu0 = np.sqrt(self._nu2(mu2=mu0**2))
             yield np.array([mu0, nu0])
 
