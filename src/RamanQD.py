@@ -211,8 +211,7 @@ class RamanQD(RootSolverComplex2d):
         self._print('Done\n')
         return ans
 
-    def _cross_section_p(self, omega_l, omega_s, e_s, p, phonon_assist=False,
-                         omega_q=None):
+    def _cross_section_p(self, omega_l, omega_s, e_s, p, phonon_assist=False):
         """See Riera (202, 203) [(216, 217) for phonon-assist]. Note that
         the computation of the common prefactor containing sigma_0, which is
         present in Riera (202, 203) has been moved to cross_section to
@@ -223,16 +222,16 @@ class RamanQD(RootSolverComplex2d):
                                              e_s=e_s, p=p)
         else:
             return self._cross_section_p_phonon(
-                omega_l=omega_l, omega_s=omega_s, omega_q=omega_q,
-                e_s=e_s, p=p)
+                omega_l=omega_l, omega_s=omega_s, e_s=e_s, p=p)
 
-    def _cross_section_p_phonon(self, omega_l, omega_s, e_s, omega_q, p):
+    def _cross_section_p_phonon(self, omega_l, omega_s, e_s, p):
         t1 = 0
         for s, s1, s2 in it.product(self.states_SP(), repeat=3):
+            l, m, n = self.get_numbers(state=s)
+            omega_q = self.hamiltonian.omega(l=l, n=n)  # TODO: is this right?
             G2 = self.G2(omega_l=omega_l, omega_s=omega_s, omega_q=omega_q,
                          xa1=self.x(j=1, state=s1), xa2=self.x(j=2, state=s2))
             t2 = self.S(p=p, e_s=e_s) / (G2**2 + self.delta_f**2)
-            l, m, n = self.get_numbers(state=s)
             if p == 0 and m == 0:
                 M11 = self.Mph_j(1, 1, states=[s, s1, s2],
                                  omega_s=omega_s, omega_q=omega_q)

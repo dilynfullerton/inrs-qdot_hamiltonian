@@ -130,8 +130,11 @@ class HamiltonianQD(RootSolverComplex2d):
             yield self.omega(mu=mu), n
 
     # -- Getters --
-    def omega(self, mu):
-        return np.sqrt(self._omega2(mu=mu))
+    def omega(self, l=None, n=None, mu=None):
+        if mu is not None:
+            return np.sqrt(self._omega2(mu=mu))
+        else:
+            return self.omega(mu=self.mu_nl(n=n, l=l))
 
     def _omega2(self, mu):
         return self.omega_L2 - self.beta_L2 * self._q2(mu=mu)
@@ -173,41 +176,44 @@ class HamiltonianQD(RootSolverComplex2d):
 
     def _norm_u2(self, n, l):
         mu = self.mu_nl(n=n, l=l)
+        nu = self.nu_nl(n=n, l=l)
         r0 = self.r_0
-        mu0 = mu/r0
-        nu0 = self._nu(mu=mu) / r0
-        pl = self._p_l(l=l, mu=mu)
-        tl = self._t_l(l=l, mu=mu)
+        mu0 = mu / r0
+        nu0 = nu / r0
+        pl = self._p_l(l=l, mu=mu, nu=nu)
+        tl = self._t_l(l=l, mu=mu, nu=nu)
 
         def ifn(r):
+            g = _g(l)(nu0 * r)
+            dg = _g(l, d=1)(nu0 * r)
+            j = _j(l)(mu0 * r)
+            dj = _j(l, d=1)(mu0 * r)
             return r**2 * (
                 (
-                    -mu0 * _j(l, d=1)(mu0 * r) +
-                    l * (l+1) / r * pl * _g(l)(nu0 * r) -
+                    -mu0 * dj +
+                    l * (l+1) / r * pl * g -
                     tl * l / r0 * (r/r0) ** (l-1)
                 )**2 +
                 l * (l + 1) / r**2 *
                 (
-                    -_j(l)(mu0 * r) + pl / l *
-                    (_g(l)(nu0 * r) + nu0 * r * _g(l, d=1)(nu0 * r)) -
+                    -j + pl / l * (g + nu0 * r * dg) -
                     tl * (r/r0) ** l
                 )**2
             )
         return integ.quad(func=ifn, a=0, b=self.r_0)[0]
 
-    def _p_l(self, l, mu):
-        nu = self._nu(mu=mu)
+    def _p_l(self, l, mu, nu):
         muk = mu
         return (
             (muk * _j(l, d=1)(mu) - l * _j(l)(mu)) /
             (l * _g(l)(nu) - nu * _g(l, d=1)(nu))
         )
 
-    def _t_l(self, l, mu):
+    def _t_l(self, l, mu, nu):
         muk = mu
         ediv = self._eps_div
         return (
-            self.gamma * (self.r_0 / self._nu(mu=muk)) ** 2 *
+            self.gamma * (self.r_0 / nu) ** 2 *
             (muk * _j(l, d=1)(mu) + (l + 1) * ediv * _j(l)(mu)) /
             (l + ediv*(l+1))
         )

@@ -98,7 +98,9 @@ ydati = np.empty_like(xdat)
 for x, i in zip(xdat, it.count()):
     omega_s = QD_GaAs_RAMAN.E_0 * x
     cross_sec = QD_GaAs_RAMAN.cross_section(
-        omega_l=omega_l, e_l=e_l, omega_s=omega_s, e_s=e_s)
+        omega_l=omega_l, e_l=e_l, omega_s=omega_s, e_s=e_s,
+        phonon_assist=True,
+    )
     ydatr[i] = cross_sec.real
     ydati[i] = cross_sec.imag
 
