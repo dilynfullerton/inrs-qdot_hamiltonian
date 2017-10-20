@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 from scipy import integrate as integ
 from scipy import linalg as lin
 
-from helper_functions import J, K, basis_pmz, threej
+from helper_functions import J, K, basis_pmz, basis_spherical, threej
 from root_solver_2d import RootSolverComplex2d
 
 __all__ = ['ModelSpaceElectronHolePair', 'RamanQD']
@@ -19,7 +19,7 @@ __all__ = ['ModelSpaceElectronHolePair', 'RamanQD']
 
 def Lambda(lbj, mbj, lcj, mcj, la, ma):
     return (
-        (-1) ** (lbj % 2) *
+        (-1)**(lbj % 2) *
         np.sqrt((2*lbj+1)*(2*lcj+1)*(2*la+1)/4/np.pi) *
         threej(lbj, la, lcj, -mbj, ma, mcj) *
         threej(lbj, la, lcj, 0, 0, 0)
@@ -173,6 +173,7 @@ class RamanQD(RootSolverComplex2d):
         # Matrix elements
         self._mat_elts = dict()
         self._mat_elts_ph = dict()
+        self._intS = dict()
 
         # Other
         self.verbose = verbose
@@ -182,8 +183,13 @@ class RamanQD(RootSolverComplex2d):
             print('  >> {}'.format(string))
 
     # -- Raman cross section --
-    def cross_section(self, omega_l, e_l, omega_s, e_s, phonon_assist=False):
-        """Differential Raman scattering cross section. See Riera (201)
+    def differential_raman_efficiency(self, omega_l, e_l, omega_s, e_s=None,
+                                      phonon_assist=False):
+        """Differential Raman scattering efficiency.
+                1/sigma_0 * d^2 sigma / (d Omega d omega_s)
+        If e_s is None, this is integrated over the solid angle Omega to give
+                1/sigma_0 * (d sigma) / (d omega_s)
+        See Riera (201)
         for Raman cross section or (215) for phonon-assisted tranistions.
         Note: I have removed the factor of sigma_0 (or sigma_ph) from this
         calculation. If the user wants to see the true cross section, the
@@ -228,10 +234,12 @@ class RamanQD(RootSolverComplex2d):
         t1 = 0
         for s, s1, s2 in it.product(self.states_SP(), repeat=3):
             l, m, n = self.get_numbers(state=s)
-            omega_q = self.hamiltonian.omega(l=l, n=n)  # TODO: is this right?
+            # TODO: Figure out why omega_q is so large for (l, n) != (0, 0)
+            omega_q = abs(self.hamiltonian.omega(l=l, n=n))  # TODO: is this right?
             G2 = self.G2(omega_l=omega_l, omega_s=omega_s, omega_q=omega_q,
                          xa1=self.x(j=1, state=s1), xa2=self.x(j=2, state=s2))
             t2 = self.S(p=p, e_s=e_s) / (G2**2 + self.delta_f**2)
+
             if p == 0 and m == 0:
                 M11 = self.Mph_j(1, 1, states=[s, s1, s2],
                                  omega_s=omega_s, omega_q=omega_q)
@@ -327,7 +335,7 @@ class RamanQD(RootSolverComplex2d):
                 continue
             x2bj = self.x(j=j, l=lbj, n=nbj)**2
             second_denominator = (beta * (x2aj - x2bj) +
-                                  1j * self.Gamma_aj(j) / self.E_0)
+                                  1j * self.Gamma_bj(j) / self.E_0)
             for state_c in self.states_SP():
                 lcj, mcj, ncj = self.get_numbers(state_c)
                 # Check delta function
@@ -336,7 +344,7 @@ class RamanQD(RootSolverComplex2d):
                 # Get first denominator and second numerator
                 x2cj = self.x(j=j, l=lcj, n=ncj)**2
                 first_denominator = (beta * (x2aj - x2cj) +
-                                     1j * self.Gamma_bj(j) / self.E_0)
+                                     1j * self.Gamma_aj(j) / self.E_0)
                 second_numerator = (
                     self.II(lbj, nbj, lcj, ncj, la, na, j=j) *
                     Lambda(lbj, mbj, lcj, mcj, la, ma) *
@@ -420,6 +428,8 @@ class RamanQD(RootSolverComplex2d):
     def S(self, p, e_s):
         """Polarization S_p. See Riera (149)
         """
+        if e_s is None:
+            return self.intS(p)
         pms = basis_pmz()
         if p == 1:
             return abs(np.dot(e_s, pms[:, 0]).sum())**2
@@ -430,6 +440,21 @@ class RamanQD(RootSolverComplex2d):
         else:  # p = 0
             return (abs(np.dot(e_s, pms[:, 0]).sum()) *
                     abs(np.dot(e_s, pms[:, 1]).sum()))
+
+    def intS(self, p):
+        if p in self._intS:
+            return self._intS[p]
+        else:
+            self._set_intS()
+            return self.intS(p)
+
+    def _set_intS(self):
+        def ifn(theta, phi, p):
+            e_s = basis_spherical(theta, phi)[:, 0]
+            return self.S(p=p, e_s=e_s)
+        for p in range(4):
+            self._intS[p] = integ.nquad(ifn, ranges=[(0, np.pi), (0, 2*np.pi)],
+                                        args=(p,))[0]
 
     def g2(self, x1, x2, omega_l, omega_s):
         """See Riera (150)
@@ -442,10 +467,8 @@ class RamanQD(RootSolverComplex2d):
     def G2(self, xa1, xa2, omega_l, omega_s, omega_q):
         """See Riera (166)
         """
-        return (
-            self.g2(x1=xa1, x2=xa2, omega_l=omega_l, omega_s=omega_s) -
-            omega_q / self.E_0
-        )
+        g2 = self.g2(x1=xa1, x2=xa2, omega_l=omega_l, omega_s=omega_s)
+        return g2 - omega_q / self.E_0
 
     def p_cv0(self):
         """Momentum between valence and conduction bands, at k=0.
@@ -643,6 +666,7 @@ class RamanQD(RootSolverComplex2d):
             return np.array([fr + 1j * fi, gr + 1j * gi])
 
         def fpr(x):
+            x = complex(x)
             y = np.sqrt(self._y2(x2=x**2, j=j))
             return np.real(rootfn(np.array([x, y])))[0]
 
@@ -668,6 +692,7 @@ class RamanQD(RootSolverComplex2d):
         ypr = np.real(np.sqrt([self._y2(x2=x**2, j=j) for x in xdat]))
         # ypr /= lin.norm(ypr, ord=2)
         ax.plot(xdat, ypr, '-', color='blue')
+        ax.plot(xdat, -ypr, '-', color='blue')
         # ax.set_ylim(bottom=0)
 
         if show:

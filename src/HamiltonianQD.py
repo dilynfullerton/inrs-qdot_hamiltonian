@@ -76,23 +76,27 @@ class HamiltonianQD(RootSolverComplex2d):
         self._verbose = verbose
 
     # -- Hamiltonian --
+    # TODO: Ensure this equation is correct
     def H_epi(self, r, theta, phi):
         """Electron-phonon interaction Hamiltonian at spherical coordinates
-        (r, theta, phi). The definition is based on Roca (42)
+        (r, theta, phi). The definition is based on Roca (42) and
+        Riera (60).
         """
         h = 0
         for l, m, n in self.iter_lmn():
             h += (
-                self.r_0 * self.C_F / self.mu_nl(n=n, l=l) * (2 * l + 1) *
-                1j**(l % 4) * np.sqrt(2 * pi) * self.Phi_ln(l=l, n=n)(r=r) *
+                - self.C_F / self.mu_nl(n=n, l=l) *
+                (2 * l + 1) * (l + (l + 1) * self._eps_div) * 1j**(l % 4) *
+                np.sqrt(2 * pi * self.r_0) * self.Phi_ln(l=l, n=n)(r=r) *
                 Y_lm(l=l, m=m)(theta=theta, phi=phi) *
                 (self._b(l=l, m=m, n=n) + self._b(l=l, m=m, n=n).dag())
                 # TODO: Should b creation be at negative n?
             )
         return
 
+    # TODO: Ensure this equation is correct
     def Phi_ln(self, l, n):
-        """See Roca (43)
+        """See Roca (43) and Riera (60)
         """
         mu_n = self.mu_nl(n=n, l=l)
         ediv = self._eps_div
@@ -100,13 +104,15 @@ class HamiltonianQD(RootSolverComplex2d):
         def phifn(r):
             r0 = self.r_0
             if r <= r0:
-                return (
+                return 1 / np.sqrt(r0) * (
+                    _j(l)(mu_n*r/r0) -
                     (mu_n * _j(l, d=1)(mu_n) + (l + 1) * ediv * _j(l)(mu_n)) *
-                    (r/r0)**l - (l + (l + 1) * ediv) * _j(l)(mu_n*r/r0)
+                    (r/r0)**l / (l + (l + 1) * ediv)
                 )
             else:
-                return (
-                    (mu_n * _j(l, d=1)(mu_n) - l * _j(l)(mu_n)) / (r/r0)**(l+1)
+                return 1 / np.sqrt(r0) * (
+                    (-mu_n * _j(l, d=1)(mu_n) + l * ediv * _j(l)(mu_n)) *
+                    (r0/r)**(l+1) / (l + (l + 1) * ediv)
                 )
         return phifn
 
@@ -130,29 +136,28 @@ class HamiltonianQD(RootSolverComplex2d):
             yield self.omega(mu=mu), n
 
     # -- Getters --
-    def omega(self, l=None, n=None, mu=None):
-        if mu is not None:
-            return np.sqrt(self._omega2(mu=mu))
+    def omega(self, l=None, n=None, mu=None, nu=None):
+        if mu is not None and nu is not None:
+            omega2 = self._omega2(mu2=mu**2, nu2=nu**2)
+            return np.sqrt(omega2)
         else:
-            return self.omega(mu=self.mu_nl(n=n, l=l))
+            return self.omega(mu=self.mu_nl(n=n, l=l), nu=self.nu_nl(n=n, l=l))
 
-    def _omega2(self, mu):
-        return self.omega_L2 - self.beta_L2 * self._q2(mu=mu)
+    def _omega2(self, mu2, nu2):
+        return (
+            (self.omega_T2 + self.omega_L2) / 2 -
+            (self.beta_L2 * mu2 + self.beta_T2 * nu2) / 2 / self.r_0**2
+        )
 
-    def Q(self, mu):
-        return np.sqrt(self._Q2(mu=mu))
+    def _Q2(self, mu, nu):
+        return (
+            (self.omega_T2 - self._omega2(mu2=mu**2, nu2=nu**2)) / self.beta_T2
+        )
 
-    def _Q2(self, mu):
-        return (self.omega_T2 - self._omega2(mu=mu)) / self.beta_T2
-
-    def q(self, mu):
-        return complex(mu / self.r_0)
-
-    def _q2(self, mu):
-        return self.q(mu=mu)**2
-
-    def _nu(self, mu):
-        return self.r_0 * self.Q(mu=mu)
+    def _q2(self, mu, nu):
+        return (
+            (self.omega_L2 - self._omega2(mu2=mu**2, nu2=nu**2)) / self.beta_L2
+        )
 
     def _F_l(self, l, nu):
         r0 = self.r_0
@@ -231,6 +236,14 @@ class HamiltonianQD(RootSolverComplex2d):
         else:
             raise RuntimeError  # TODO
 
+    def _nu2(self, mu2):
+        mu2 = complex(mu2)
+        return self._beta_div2 * mu2 - self.r_0**2 * self.gamma
+
+    def _nu(self, mu):
+        mu = complex(mu)
+        return np.sqrt(self._nu2(mu2=mu**2))
+
     def plot_root_function_mu(self, l, xdat, show=True):
         fn = self._get_root_function(l=l)
 
@@ -262,9 +275,10 @@ class HamiltonianQD(RootSolverComplex2d):
         # ylog /= lin.norm(ylog, ord=2)
         # ax.plot(xdat, ylog, '--', color='red')
 
-        ypr = np.real([self._nu(mu=x) for x in xdat])
+        ypr = np.real(np.sqrt([self._nu2(mu2=x**2) for x in xdat]))
         ypr /= lin.norm(ypr, ord=2)
         ax.plot(xdat, ypr, '-', color='blue')
+        ax.plot(xdat, -ypr, '-', color='blue')
 
         if show:
             plt.show()
@@ -282,7 +296,7 @@ class HamiltonianQD(RootSolverComplex2d):
     def _get_expected_roots_xy(self, l, *args, **kwargs):
         for mu0 in self._expected_roots_mu[l]:
             mu0 = complex(mu0)
-            nu0 = self._nu(mu=mu0)
+            nu0 = np.sqrt(self._nu2(mu2=mu0**2))
             yield np.array([mu0, nu0])
 
     def _get_root_func1(self, l, *args, **kwargs):
@@ -291,7 +305,7 @@ class HamiltonianQD(RootSolverComplex2d):
             if self._large_R:
                 return (
                     mu * nu * dj_mu * _g(l, d=1)(mu) *
-                    (self.gamma * l / self.Q(mu=mu)**2 +
+                    (self.gamma * l / self._Q2(mu=mu, nu=nu) +
                      (l + self._eps_div * (l + 1)))
                 )
             else:
@@ -306,6 +320,6 @@ class HamiltonianQD(RootSolverComplex2d):
 
     def _get_root_func2(self, *args, **kwargs):
         def rf2(mu, nu):
-            return (mu**2 * self._beta_div2 - nu**2) / self.r_0**2 - self.gamma
+            return (mu**2 * self._beta_div2 - nu**2) - self.r_0**2 * self.gamma
         return rf2
 
