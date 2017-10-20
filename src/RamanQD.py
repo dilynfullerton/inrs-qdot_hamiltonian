@@ -2,63 +2,24 @@
 Definitions for creating a Raman spectra for a quantum dot according to
 the definitions in Riera
 """
-import numpy as np
 import itertools as it
-from scipy import integrate as integ
-from scipy import optimize as opt
-from scipy import linalg as lin
-from helper_functions import J, K
-from HamiltonianQD import plot_dispersion_function
-from matplotlib import pyplot as plt
-import qutip as qt
 from collections import namedtuple
 
+import numpy as np
+import qutip as qt
+from matplotlib import pyplot as plt
+from scipy import integrate as integ
+from scipy import linalg as lin
 
-__all__ = ['ModelSpaceElectronHolePair', 'RamanQD', 'PhysicalConstants']
+from helper_functions import J, K, basis_pmz, threej
+from root_solver_2d import RootSolverComplex2d
 
-
-def _lc_tensor(a, b, c):
-    if a < b < c or b < c < a or c < a < b:
-        return 1
-    elif a < c < b or b < a < c or c < b < a:
-        return -1
-    else:
-        return 0
-
-
-def basis_cartesian():
-    return np.eye(3, 3)
-
-
-def basis_pmz():
-    isq2 = 1/np.sqrt(2)
-    return np.array([[isq2,  1j*isq2, 0],
-                     [isq2, -1j*isq2, 0],
-                     [0,     0,       1]])
-
-
-def basis_spherical(theta, phi):
-    xph = -np.sin(phi)
-    yph = np.cos(phi)
-    zph = 0
-    zr = np.cos(theta)
-    zth = -np.sin(theta)
-    xth = zr * yph
-    yth = zr * -xph
-    xr = -zth * yph
-    yr = -zth * -xph
-    return np.array([[xr, xth, xph],
-                     [yr, yth, yph],
-                     [zr, zth, zph]])
-
-
-def threej(j1, j2, j, m1, m2, m):
-    return 0  # TODO
+__all__ = ['ModelSpaceElectronHolePair', 'RamanQD']
 
 
 def Lambda(lbj, mbj, lcj, mcj, la, ma):
     return (
-        (-1)**(lbj % 2) *
+        (-1) ** (lbj % 2) *
         np.sqrt((2*lbj+1)*(2*lcj+1)*(2*la+1)/4/np.pi) *
         threej(lbj, la, lcj, -mbj, ma, mcj) *
         threej(lbj, la, lcj, 0, 0, 0)
@@ -85,9 +46,6 @@ def Pi(j, p, laj, maj):
         return Pi(j=1, p=3, laj=laj-1, maj=maj)
     else:
         raise RuntimeError
-
-
-PhysicalConstants = namedtuple('PhysicalConstants', ['e'])
 
 
 class ModelSpaceElectronHolePair:
@@ -169,17 +127,17 @@ class ModelSpaceElectronHolePair:
             )
 
 
-class RamanQD:
-    def __init__(self, hamiltonian, nmax, lmax, unit_cell, refidx, radius,
+class RamanQD(RootSolverComplex2d):
+    def __init__(self, hamiltonian, unit_cell, refidx,
                  V1, V2, E_g, mu_i1, mu_i2, mu_01, mu_02,
-                 free_electron_mass, electron_charge,
+                 free_electron_mass,
                  Gamma_f, Gamma_a1, Gamma_a2, Gamma_b1, Gamma_b2,
                  expected_roots_x_lj, verbose=False):
         # Model constants
-        self._num_n = nmax + 1
-        self._num_l = lmax + 1
-        self.ms = ModelSpaceElectronHolePair(num_n=self._num_n)
         self.hamiltonian = hamiltonian
+        self.num_n = self.hamiltonian.num_n
+        self.num_l = self.hamiltonian.num_l
+        self.ms = ModelSpaceElectronHolePair(num_n=self.num_n)
 
         # j-dependent physical constants
         self._V_j = [V1, V2]
@@ -192,13 +150,13 @@ class RamanQD:
         self._a_matrix = unit_cell
         self.E_g = E_g  # Gap energy
         self.mu_0 = free_electron_mass  # Free electron mass
-        self.e = abs(electron_charge)
         self.Gamma_f = Gamma_f
 
         # Functions
         self.eta = refidx  # omega -> refractive index
 
-        # Derived physical constants
+        # Derived/inherited physical constants
+        self.e = abs(self.hamiltonian.electron_charge)
         self.r_0 = self.hamiltonian.r_0
         self.mu_r = 1/(1 / self.mu_ij(1) + 1 / self.mu_ij(2))  # Riera (92)
         self.E_0 = 1 / 2 / self.mu_r / self.r_0**2  # Riera (151)
@@ -448,10 +406,13 @@ class RamanQD:
 
     # -- States --
     def states_SP(self):
-        return self.ms.iter_states_SP(num_l=self._num_l)
+        for state in self.ms.iter_states_SP(num_l=self.num_l):
+            l, m, n = self.get_numbers(state)
+            if (l, n, 1) in self._x and (l, n, 2) in self._x:
+                yield state
 
     def states_EHP(self):
-        return self.ms.iter_states_EHP(num_l=self._num_l)
+        return self.ms.iter_states_EHP(num_l=self.num_l)
 
     def get_numbers(self, state):
         return state[0]
@@ -655,35 +616,18 @@ class RamanQD:
         elif state is not None:
             l, m, n = self.get_numbers(state=state)
             return self.x(j=j, l=l, n=n)
+        elif n == 0 and l >= self.num_l:
+            return 0+0j
         else:
-            raise RuntimeError  # TODO
+            return None
 
     def y(self, l, n, j):
         if (l, n, j) in self._y:
             return self._y[l, n, j]
+        elif n == 0 and l >= self.num_l:
+            return np.sqrt(self._y2(x2=0+0j, j=j))
         else:
-            raise RuntimeError  # TODO
-
-    def _fill_roots_xy(self):
-        for j, l in it.product([1, 2], range(self._num_l)):
-            for root, n in zip(self._solve_roots_xy(l=l, j=j),
-                               range(self._num_n)):
-                x, y = root
-                assert not np.isnan(x)
-                assert not np.isnan(y)
-                self._x[l, n, j] = x
-                self._y[l, n, j] = y
-
-    def _solve_roots_xy(self, l, j):
-        fun, jac = self.get_rootf_rootdf_xy(l=l, j=j)
-        for x0y0 in self.expected_roots_xy(l=l, j=j):
-            # assert opt.check_grad(func=fun, grad=jac, x0=x0y0)
-            result = opt.root(fun=fun, jac=jac, x0=x0y0)
-            if not result.success:
-                print('FAILED')  # TODO
-            else:
-                xr, xi, yr, yi = result.x
-                yield np.array([xr + 1j * xi, yr + 1j * yi])
+            return None
 
     def _y2(self, x2, j):
         return (
@@ -691,8 +635,8 @@ class RamanQD:
             self.mu_0j(j) / self.mu_ij(j) * x2
         )
 
-    def plot_root_fn_x(self, l, j, xdat):
-        fn = self.get_rootf_rootdf_xy(l=l, j=j)[0]
+    def plot_root_fn_x(self, l, j, xdat, show=True):
+        fn = self._get_root_function(l=l, j=j)
 
         def rootfn(xy):
             x, y = xy
@@ -703,106 +647,51 @@ class RamanQD:
             y = np.sqrt(self._y2(x2=x**2, j=j))
             return np.real(rootfn(np.array([x, y])))[0]
 
-        def fmr(x):
-            y = -np.sqrt(self._y2(x2=x**2, j=j))
-            return np.real(rootfn(np.array([x, y])))[0]
-
-        def fpi(x):
-            y = np.sqrt(self._y2(x2=x**2, j=j))
-            return np.imag(rootfn(np.array([x, y])))[0]
-
-        def fmi(x):
-            y = -np.sqrt(self._y2(x2=x**2, j=j))
-            return np.imag(rootfn(np.array([x, y])))[0]
-
-        def ix():
-            for n in range(self._num_n):
-                return ()
-                # yield self.x(l, n, j)
-
         fig, ax = plt.subplots(1, 1)
-        # plot_dispersion_function(
-        #     xdat=xdat, rootfn=fpr, iterfn=ix(), fig=fig, ax=ax, show=False)
-        # plot_dispersion_function(
-        #     xdat=xdat, rootfn=fpi, iterfn=ix(), fig=fig, ax=ax, show=False)
-        # plot_dispersion_function(
-        #     xdat=xdat, rootfn=fmr, iterfn=ix(), fig=fig, ax=ax2, show=False)
-        # plot_dispersion_function(
-        #     xdat=xdat, rootfn=fmi, iterfn=ix(), fig=fig, ax=ax2, show=False)
-
         ax.axhline(0, color='gray', lw=1, alpha=.5)
         ax.axvline(0, color='gray', lw=1, alpha=.5)
 
-        for n in range(self._num_n):
-            try:
-                x = self.x(j=j, l=l, n=n)
+        for n in range(self.num_n):
+            x = self.x(j=j, l=l, n=n)
+            if x is not None:
                 ax.axvline(x.real, ls='--', color='green', lw=1, alpha=.5)
-            except RuntimeError:
+            else:
                 print('crap')
 
         ydat = np.array([fpr(x) for x in xdat])
-        ydat /= lin.norm(ydat, ord=2)
+        # ydat /= lin.norm(ydat, ord=2)
         ax.plot(xdat, ydat, '-', color='red')
 
         ylog = np.log(np.abs(ydat))
-        ylog /= lin.norm(ylog, ord=2)
+        # ylog /= lin.norm(ylog, ord=2)
         ax.plot(xdat, ylog, '--', color='red')
 
         ypr = np.real(np.sqrt([self._y2(x2=x**2, j=j) for x in xdat]))
-        ypr /= lin.norm(ypr, ord=2)
+        # ypr /= lin.norm(ypr, ord=2)
         ax.plot(xdat, ypr, '-', color='blue')
         # ax.set_ylim(bottom=0)
 
-        plt.show()
+        if show:
+            plt.show()
         return fig, ax
 
-    def expected_roots_xy(self, l, j):
+    def _fill_roots_xy(self):
+        for j, l in it.product([1, 2], range(self.num_l)):
+            for root, n in zip(self._solve_roots_xy(l=l, j=j),
+                               range(self.num_n)):
+                x, y = root
+                assert not np.isnan(x)  # TODO
+                assert not np.isnan(y)  # TODO
+                self._x[l, n, j] = x
+                self._y[l, n, j] = y
+
+    def _get_expected_roots_xy(self, l, j, *args, **kwargs):
         for x0 in self._expected_roots_x[l, j]:
             x0 = complex(x0)
             y0 = np.sqrt(self._y2(x2=x0**2, j=j))
-            yield np.array([x0.real, x0.imag, y0.real, y0.imag])
-            # yield np.array([x0.real, x0.imag, -y0.real, -y0.imag])
+            yield np.array([x0, y0])
 
-    def get_rootf_rootdf_xy(self, l, j):
-        fun_f = self._get_rootf1(l=l, j=j)
-        fun_g = self._get_rootf2(j=j)
-
-        def pi(zz):
-            z1, z2 = zz
-            return np.array([z1.real, z1.imag, z2.real, z2.imag])
-
-        def ipi(xxyy):
-            xr, xi, yr, yi = xxyy
-            return np.array([xr+1j*xi, yr+1j*yi])
-
-        dipi = np.array([[1, 1j, 0, 0],
-                         [0, 0, 1, 1j]])
-        dpi = dipi.transpose().conjugate()
-
-        def psi(zz):
-            z1, z2, = zz
-            f = complex(fun_f(z1, z2))
-            g = complex(fun_g(z1, z2))
-            return np.array([f, g])
-
-        def dpsi(zz):
-            z1, z2 = zz
-            fz1 = complex(fun_f(z1, z2, partial_x=1))
-            fz2 = complex(fun_f(z1, z2, partial_y=1))
-            gz1 = complex(fun_g(z1, z2, partial_x=1))
-            gz2 = complex(fun_g(z1, z2, partial_y=1))
-            return np.array([[fz1, fz2],
-                             [gz1, gz2]])
-
-        def rf(xxyy, *args, **kwargs):
-            return pi(psi(ipi(xxyy)))
-
-        def rdf(xxyy, *args, **kwargs):
-            return dpi.dot(dpsi(ipi(xxyy)).dot(dipi))
-
-        return rf, None
-
-    def _get_rootf1(self, l, j):
+    def _get_root_func1(self, l, j, *args, **kwargs):
         l = l+1/2
         mu0 = self.mu_0j(j)
         mui = self.mu_ij(j)
@@ -830,7 +719,7 @@ class RamanQD:
                 raise RuntimeError  # TODO
         return rf1
 
-    def _get_rootf2(self, j):
+    def _get_root_func2(self, j, *args, **kwargs):
         mu0 = self.mu_0j(j)
         mui = self.mu_ij(j)
         vj = self.V_j(j)
@@ -856,4 +745,3 @@ class RamanQD:
                 mu0 / mui * _fx2(x, deriv=partial_x) - tc)
 
         return rf2
-

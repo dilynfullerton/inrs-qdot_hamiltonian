@@ -1,5 +1,5 @@
 from collections import namedtuple
-from HamiltonianQD import HamiltonianEPI
+from HamiltonianQD import HamiltonianQD
 import numpy as np
 import itertools as it
 from matplotlib import pyplot as plt
@@ -61,7 +61,7 @@ if LARGE_R:
 else:
     EXP_MU = EXP_MU_NORMAL
 
-ham = HamiltonianEPI(
+ham = HamiltonianQD(
     r_0=R0,
     omega_LO=OMEGA_LO,
     l_max=LMAX,
@@ -96,7 +96,7 @@ wdats_l0 = [[] for i in range(NMAX + 1)]
 wdats_l1 = [[] for i in range(NMAX + 1)]
 for R, i in zip(rdat, it.count()):
     print('R = {:8.4e}'.format(R))
-    ham = HamiltonianEPI(
+    ham = HamiltonianQD(
         r_0=R,
         omega_LO=OMEGA_LO,
         l_max=LMAX,

@@ -1,3 +1,5 @@
+import numpy as np
+import qutip as qt
 from scipy import special as sp
 
 
@@ -55,9 +57,48 @@ def g_sph(l, d=0):
     def fn_g(z):
         z = complex(z)
         if (z**2).real >= 0:
-            j = _j(l, d)(z)
+            j = j_sph(l, d)(z)
             return j
         else:
-            i = _i(l, d)(z)
+            i = i_sph(l, d)(z)
             return i
     return fn_g
+
+
+def levi_civita(a, b, c):
+    if a < b < c or b < c < a or c < a < b:
+        return 1
+    elif a < c < b or b < a < c or c < b < a:
+        return -1
+    else:
+        return 0
+
+
+def basis_cartesian():
+    return np.eye(3, 3)
+
+
+def basis_pmz():
+    isq2 = 1/np.sqrt(2)
+    return np.array([[isq2,  1j*isq2, 0],
+                     [isq2, -1j*isq2, 0],
+                     [0,     0,       1]])
+
+
+def basis_spherical(theta, phi):
+    xph = -np.sin(phi)
+    yph = np.cos(phi)
+    zph = 0
+    zr = np.cos(theta)
+    zth = -np.sin(theta)
+    xth = zr * yph
+    yth = zr * -xph
+    xr = -zth * yph
+    yr = -zth * -xph
+    return np.array([[xr, xth, xph],
+                     [yr, yth, yph],
+                     [zr, zth, zph]])
+
+
+def threej(j1, j2, j, m1, m2, m):
+    return (-1)**(j1-j2-m)/np.sqrt(2*j + 1) * qt.clebsch(j1, j2, j, m1, m2, -m)
