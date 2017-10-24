@@ -132,12 +132,17 @@ class RamanQD(RootSolverComplex2d):
                  V1, V2, E_g, mu_i1, mu_i2, mu_01, mu_02,
                  free_electron_mass,
                  Gamma_f, Gamma_a1, Gamma_a2, Gamma_b1, Gamma_b2,
-                 expected_roots_x_lj, verbose=False):
+                 expected_roots_x_lj, num_n=None, num_l=None,
+                 verbose=False):
         # Model constants
         self.hamiltonian = hamiltonian
-        self.num_n = self.hamiltonian.num_n
-        self.num_l = self.hamiltonian.num_l
         self.ms = ModelSpaceElectronHolePair(num_n=self.num_n)
+        self.num_n = num_n
+        self.num_l = num_l
+        if self.num_n is None:
+            self.num_n = self.hamiltonian.num_n
+        if self.num_l is None:
+            self.num_l = self.hamiltonian.num_l
 
         # j-dependent physical constants
         self._V_j = [V1, V2]
@@ -232,33 +237,34 @@ class RamanQD(RootSolverComplex2d):
 
     def _cross_section_p_phonon(self, omega_l, omega_s, e_s, p):
         t1 = 0
-        for s, s1, s2 in it.product(self.states_SP(), repeat=3):
-            l, m, n = self.get_numbers(state=s)
-            # TODO: Figure out why omega_q is so large for (l, n) != (0, 0)
-            omega_q = abs(self.hamiltonian.omega(l=l, n=n))  # TODO: is this right?
-            G2 = self.G2(omega_l=omega_l, omega_s=omega_s, omega_q=omega_q,
-                         xa1=self.x(j=1, state=s1), xa2=self.x(j=2, state=s2))
-            t2 = self.S(p=p, e_s=e_s) / (G2**2 + self.delta_f**2)
+        for s in self.states_SP_phonon():
+            for s1, s2 in it.product(self.states_SP(), repeat=2):
+                l, m, n = self.get_numbers(state=s)
+                # TODO: Figure out why omega_q is so large for (l, n) != (0, 0)
+                omega_q = abs(self.hamiltonian.omega(l=l, n=n))  # TODO: is this right?
+                G2 = self.G2(omega_l=omega_l, omega_s=omega_s, omega_q=omega_q,
+                             xa1=self.x(j=1, state=s1), xa2=self.x(j=2, state=s2))
+                t2 = self.S(p=p, e_s=e_s) / (G2**2 + self.delta_f**2)
 
-            if p == 0 and m == 0:
-                M11 = self.Mph_j(1, 1, states=[s, s1, s2],
-                                 omega_s=omega_s, omega_q=omega_q)
-                M12 = self.Mph_j(1, 2, states=[s, s1, s2],
-                                 omega_s=omega_s, omega_q=omega_q)
-                M21 = self.Mph_j(2, 1, states=[s, s1, s2],
-                                 omega_s=omega_s, omega_q=omega_q)
-                M22 = self.Mph_j(2, 2, states=[s, s1, s2],
-                                 omega_s=omega_s, omega_q=omega_q)
-                t1 += t2 * (
-                    M11.real * M22.real + M12.real * M21.real +
-                    M11.imag * M22.imag + M12.imag * M21.imag
-                )
-            elif p > 0:
-                M1p = self.Mph_j(1, p, states=[s, s1, s2],
-                                 omega_s=omega_s, omega_q=omega_q)
-                M2p = self.Mph_j(2, p, states=[s, s1, s2],
-                                 omega_s=omega_s, omega_q=omega_q)
-                t1 += abs(M1p + M2p)**2 * t2
+                if p == 0 and m == 0:
+                    M11 = self.Mph_j(1, 1, states=[s, s1, s2],
+                                     omega_s=omega_s, omega_q=omega_q)
+                    M12 = self.Mph_j(1, 2, states=[s, s1, s2],
+                                     omega_s=omega_s, omega_q=omega_q)
+                    M21 = self.Mph_j(2, 1, states=[s, s1, s2],
+                                     omega_s=omega_s, omega_q=omega_q)
+                    M22 = self.Mph_j(2, 2, states=[s, s1, s2],
+                                     omega_s=omega_s, omega_q=omega_q)
+                    t1 += t2 * (
+                        M11.real * M22.real + M12.real * M21.real +
+                        M11.imag * M22.imag + M12.imag * M21.imag
+                    )
+                elif p > 0:
+                    M1p = self.Mph_j(1, p, states=[s, s1, s2],
+                                     omega_s=omega_s, omega_q=omega_q)
+                    M2p = self.Mph_j(2, p, states=[s, s1, s2],
+                                     omega_s=omega_s, omega_q=omega_q)
+                    t1 += abs(M1p + M2p)**2 * t2
         return t1
 
     def _cross_section_p_reg(self, omega_l, omega_s, e_s, p):
@@ -293,9 +299,9 @@ class RamanQD(RootSolverComplex2d):
         anums0, anums1, anums2 = [self.get_numbers(s) for s in states]
 
         # If stored in dict, use that
-        if (j, p, anums1, anums2) in self._mat_elts_ph:
+        if (j, p, anums0, anums1, anums2) in self._mat_elts_ph:
             mm = 0
-            fracs = self._mat_elts_ph[j, p, anums1, anums2]
+            fracs = self._mat_elts_ph[j, p, anums0, anums1, anums2]
             for num1, denom1, num2, denom2 in fracs:
                 mm += (
                     num1 / (denom1 + omega_s/self.E_0 + omega_q/self.E_0) *
@@ -355,7 +361,7 @@ class RamanQD(RootSolverComplex2d):
                     (first_numerator, first_denominator,
                      second_numerator, second_denominator)
                 )
-        self._mat_elts_ph[j, p, anums[0], anums[1]] = fracs
+        self._mat_elts_ph[j, p, anums0, anums1, anums2] = fracs
 
     def Mj(self, j, p, states, omega_s):
         """See Riera (204) and (205)
@@ -417,6 +423,10 @@ class RamanQD(RootSolverComplex2d):
             l, m, n = self.get_numbers(state)
             if (l, n, 1) in self._x and (l, n, 2) in self._x:
                 yield state
+
+    def states_SP_phonon(self):
+        for l, m, n in self.hamiltonian.iter_lmn():
+            yield (l, m, n), None  # TODO
 
     def states_EHP(self):
         return self.ms.iter_states_EHP(num_l=self.num_l)

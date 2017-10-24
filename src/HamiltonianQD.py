@@ -26,15 +26,15 @@ from root_solver_2d import RootSolverComplex2d
 
 
 class HamiltonianQD(RootSolverComplex2d):
-    def __init__(self, r_0, omega_L, omega_T, l_max, n_max,
+    def __init__(self, r_0, omega_L, omega_T, num_n, num_l,
                  epsilon_inf_qdot, epsilon_inf_env, beta_T, beta_L,
                  expected_roots_mu_l, electron_charge=1,
                  large_R_approximation=False, verbose=False):
         # Model constants
-        self.l_max = l_max
-        self.n_max = n_max
-        self.num_n = self.n_max + 1
-        self.num_l = self.l_max + 1
+        self.num_n = num_n
+        self.num_l = num_l
+        self.n_max = self.num_n - 1
+        self.l_max = self.num_l - 1
 
         # Physical constants
         self.r_0 = r_0
@@ -130,9 +130,10 @@ class HamiltonianQD(RootSolverComplex2d):
                     yield l, m, n
 
     def iter_mu_n(self, l):
-        for n, i in zip(range(self.n_max + 1), it.count()):
+        for n in range(self.num_n):
             mu = self.mu_nl(n=n, l=l)
-            yield mu, n
+            if mu is not None:
+                yield mu, n
 
     def iter_omega_n(self, l):
         for mu, n in self.iter_mu_n(l):

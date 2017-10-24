@@ -15,8 +15,6 @@ GAMMA_A1 = ELECTRON_CHARGE / 100
 
 
 QD_GaAs_HAM = HamiltonianQD(
-    n_max=7,
-    l_max=1,
     r_0=2.0,  # [nm]
     omega_L=0.03782,  # [eV]
     omega_T=0.02951,  # [eV]
@@ -31,7 +29,9 @@ QD_GaAs_HAM = HamiltonianQD(
         2: [.0001, 1.99, 2.95, 3.54, 4.30, 5.26],
         3: [.0000001, 2.39, 3.45, 4.30, 4.90, 5.75],
         4: [.0000001, 2.75, 3.88, 4.85, 5.65, 6.30],
-    }
+    },
+    num_n=3,
+    num_l=2,
 )
 
 # Plot roots
@@ -104,6 +104,8 @@ QD_GaAs_RAMAN = RamanQD(
         (4, 1): [.001],
         (4, 2): [.001],
     },
+    num_n=7,
+    num_l=2,
     verbose=True,
 )
 
