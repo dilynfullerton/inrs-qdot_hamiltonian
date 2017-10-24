@@ -668,7 +668,12 @@ class RamanQD(RootSolverComplex2d):
         def fpr(x):
             x = complex(x)
             y = np.sqrt(self._y2(x2=x**2, j=j))
-            return np.real(rootfn(np.array([x, y])))[0]
+            result = rootfn(np.array([x, y]))[0]
+            # return np.real(result)
+            if np.real(x) < 0:
+                return np.imag(result)
+            else:
+                return np.real(result)
 
         fig, ax = plt.subplots(1, 1)
         ax.axhline(0, color='gray', lw=1, alpha=.5)

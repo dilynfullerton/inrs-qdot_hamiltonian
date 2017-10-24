@@ -15,8 +15,8 @@ GAMMA_A1 = ELECTRON_CHARGE / 100
 
 
 QD_GaAs_HAM = HamiltonianQD(
-    n_max=5,
-    l_max=4,
+    n_max=7,
+    l_max=1,
     r_0=2.0,  # [nm]
     omega_L=0.03782,  # [eV]
     omega_T=0.02951,  # [eV]
@@ -35,12 +35,9 @@ QD_GaAs_HAM = HamiltonianQD(
 )
 
 # Plot roots
-XDAT_MU = np.linspace(1e-6, 20, 10000)
-# QD_GaAs_HAM.plot_root_function_mu(l=0, xdat=XDAT_MU, show=True)
-# QD_GaAs_HAM.plot_root_function_mu(l=1, xdat=XDAT_MU, show=True)
-# QD_GaAs_HAM.plot_root_function_mu(l=2, xdat=XDAT_MU, show=True)
-# QD_GaAs_HAM.plot_root_function_mu(l=3, xdat=XDAT_MU, show=True)
-# QD_GaAs_HAM.plot_root_function_mu(l=4, xdat=XDAT_MU, show=True)
+XDAT_MU = np.linspace(1e-6, 10, 10000)
+QD_GaAs_HAM.plot_root_function_mu(l=0, xdat=XDAT_MU, show=True)
+QD_GaAs_HAM.plot_root_function_mu(l=1, xdat=XDAT_MU, show=True)
 
 # assert False
 
@@ -70,6 +67,8 @@ axes[2].set_ylabel('n=2')
 axes[3].set_ylabel('n=3')
 plt.show()
 
+# assert False
+
 QD_GaAs_RAMAN = RamanQD(
     hamiltonian=QD_GaAs_HAM,
     unit_cell=LATTICE_CONST_GaAs * np.eye(3, 3),
@@ -90,10 +89,14 @@ QD_GaAs_RAMAN = RamanQD(
     Gamma_b1=GAMMA_A1,
     Gamma_b2=GAMMA_A1,
     expected_roots_x_lj={
-        (0, 1): [.001, 2.79, 5.36],
-        (0, 2): [.001, 3.00, 5.94, 8.34],
-        (1, 1): [.001, 3.96],
-        (1, 2): [.001, 4.29, 7.27],
+        # (0, 1): [.001, 2.79, 5.36],
+        # (0, 2): [.001, 3.00, 5.94, 8.34],
+        # (1, 1): [.001, 3.96],
+        # (1, 2): [.001, 4.29, 7.27],
+        (0, 1): [-5.36, -2.76, .001, 2.79, 5.36],
+        (0, 2): [-8.34, -5.94, -3.00, .001, 3.00, 5.94, 8.34],
+        (1, 1): [-3.96, .001, 3.96],
+        (1, 2): [-7.27, -4.29, .001, 4.29, 7.27],
         (2, 1): [.001],
         (2, 2): [.001],
         (3, 1): [.001],
@@ -105,30 +108,33 @@ QD_GaAs_RAMAN = RamanQD(
 )
 
 # Plot x roots
-XDAT_X = np.linspace(1e-6, 10, 10000)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=1, xdat=XDAT_X, show=True)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=2, xdat=XDAT_X, show=True)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=1, xdat=XDAT_X, show=True)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=2, xdat=XDAT_X, show=True)
+# XDAT_X = np.linspace(1e-6, 10, 10000)
+XDAT_X = np.linspace(-10, 10, 10000)
+QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=1, xdat=XDAT_X, show=True)
+QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=2, xdat=XDAT_X, show=True)
+QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=1, xdat=XDAT_X, show=True)
+QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=2, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=2, j=1, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=2, j=2, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=3, j=1, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=3, j=2, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=4, j=1, xdat=XDAT_X, show=True)
 # QD_GaAs_RAMAN.plot_root_fn_x(l=4, j=2, xdat=XDAT_X, show=True)
+
 # assert False
 
 # Plot cross section
 e_l = np.array([1, 0, 0])  # incident polarization
-omega_l = 10  # incident energy [eV]
+# omega_l = 10  # incident energy [eV]
+omega_l = 2.4  # incident energy [eV]
 e_s = np.array([0, 0, 1])  # secondary polarization
 
-xdat = np.linspace(1e-4, 1.2, 101)
+xdat = np.linspace(1e-4, 20, 101)
 ydatr = np.empty_like(xdat)
 ydati = np.empty_like(xdat)
 for x, i in zip(xdat, it.count()):
-    # omega_s = QD_GaAs_RAMAN.E_0 * x
-    omega_s = x
+    omega_s = QD_GaAs_RAMAN.E_0 * x
+    # omega_s = x
     cross_sec = QD_GaAs_RAMAN.differential_raman_efficiency(
         omega_l=omega_l, e_l=e_l, omega_s=omega_s,
         # e_s=e_s,
