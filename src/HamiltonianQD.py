@@ -57,11 +57,11 @@ class HamiltonianQD(RootSolverComplex2d):
             (self.eps_a_inf + 2 * self.eps_b_inf)
         )
         self.omega_F = np.sqrt(self.omega_F2)
-        self.electron_charge = electron_charge
+        self.electron_charge = abs(electron_charge)
         # NOTE: The following definition for gamma is different from gamma_0
         # of Riera
         self.gamma = (self.omega_L2 - self.omega_T2) / self.beta_T2
-        self.C_F = self.electron_charge * np.sqrt(  # Roca (44)
+        self.C_F = -self.electron_charge * np.sqrt(  # Riera (45)
             2 * pi * self.omega_L /
             self.V * (1/self.eps_a_inf - 1/self.eps_a_0)
         )
@@ -74,10 +74,12 @@ class HamiltonianQD(RootSolverComplex2d):
         self._large_R = large_R_approximation
         self._fill_roots_mu_nu()
 
+        # Other storage dictionaries
+        self._u2 = dict()  # l, n -> abs(u)**2
+
         self._verbose = verbose
 
     # -- Hamiltonian --
-    # TODO: Ensure this equation is correct
     def H_epi(self, r, theta, phi):
         """Electron-phonon interaction Hamiltonian at spherical coordinates
         (r, theta, phi). The definition is based on Roca (42) and
@@ -86,35 +88,36 @@ class HamiltonianQD(RootSolverComplex2d):
         h = 0
         for l, m, n in self.iter_lmn():
             h += (
-                - self.C_F / self.mu_nl(n=n, l=l) *
-                (2 * l + 1) * (l + (l + 1) * self._eps_div) * 1j**(l % 4) *
-                np.sqrt(2 * pi * self.r_0) * self.Phi_ln(l=l, n=n)(r=r) *
-                Y_lm(l=l, m=m)(theta=theta, phi=phi) *
-                (self._b(l=l, m=m, n=n) + self._b(l=l, m=m, n=n).dag())
-                # TODO: Should b creation be at negative n?
+                self.r_0 * self.C_F * np.sqrt(4*np.pi/3) *
+                self.Phi_ln(l=l, n=n)(r) * Y_lm(l=l, m=m)(theta, phi) *
+                self._b(l=l, m=m, n=n)
             )
-        return
+        return 1/2 * (h + h.dag())
 
-    # TODO: Ensure this equation is correct
     def Phi_ln(self, l, n):
         """See Roca (43) and Riera (60)
+        The returned result should be real.
         """
         mu_n = self.mu_nl(n=n, l=l)
         ediv = self._eps_div
+        dj_mu = _j(l, d=1)(mu_n)
+        j_mu = _j(l)(mu_n)
+        abs_u = self._norm_u(n=n, l=l)
 
         def phifn(r):
             r0 = self.r_0
             if r <= r0:
-                return 1 / np.sqrt(r0) * (
+                phicplx = np.sqrt(r0) / abs_u * (
                     _j(l)(mu_n*r/r0) -
-                    (mu_n * _j(l, d=1)(mu_n) + (l + 1) * ediv * _j(l)(mu_n)) *
+                    (mu_n * dj_mu + (l + 1) * ediv * j_mu) *
                     (r/r0)**l / (l + (l + 1) * ediv)
                 )
             else:
-                return 1 / np.sqrt(r0) * (
-                    (-mu_n * _j(l, d=1)(mu_n) + l * ediv * _j(l)(mu_n)) *
+                phicplx = np.sqrt(r0) / abs_u * (
+                    (-mu_n * dj_mu + l * ediv * j_mu) *
                     (r0/r)**(l+1) / (l + (l + 1) * ediv)
                 )
+            return complex(phicplx).real
         return phifn
 
     def _b(self, l, m, n):
@@ -129,7 +132,6 @@ class HamiltonianQD(RootSolverComplex2d):
     def iter_mu_n(self, l):
         for n, i in zip(range(self.n_max + 1), it.count()):
             mu = self.mu_nl(n=n, l=l)
-            # yield mu, i
             yield mu, n
 
     def iter_omega_n(self, l):
@@ -181,6 +183,9 @@ class HamiltonianQD(RootSolverComplex2d):
         return np.sqrt(self._norm_u2(n=n, l=l))
 
     def _norm_u2(self, n, l):
+        if (l, n) in self._u2:
+            return self._u2[l, n]
+        # If not in dictionary, calculate
         mu = self.mu_nl(n=n, l=l)
         nu = self.nu_nl(n=n, l=l)
         r0 = self.r_0
@@ -194,19 +199,23 @@ class HamiltonianQD(RootSolverComplex2d):
             dg = _g(l, d=1)(nu0 * r)
             j = _j(l)(mu0 * r)
             dj = _j(l, d=1)(mu0 * r)
-            return r**2 * (
-                (
-                    -mu0 * dj +
-                    l * (l+1) / r * pl * g -
-                    tl * l / r0 * (r/r0) ** (l-1)
-                )**2 +
-                l * (l + 1) / r**2 *
-                (
-                    -j + pl / l * (g + nu0 * r * dg) -
-                    tl * (r/r0) ** l
-                )**2
-            )
-        return integ.quad(func=ifn, a=0, b=self.r_0)[0]
+            abs_ur2 = abs(
+                -mu0 * dj + l * (l+1) / r * pl * g -
+                tl * l / r0 * (r/r0) ** (l-1)
+            )**2
+            if l == 0:
+                return r**2 * abs_ur2
+            else:
+                return (
+                    r**2 * abs_ur2 +
+                    l * (l + 1) +
+                    r**2 * abs(
+                        -j + pl / l * (g + nu0 * r * dg) -
+                        tl * (r/r0) ** l
+                    )**2
+                )
+        self._u2[l, n] = integ.quad(func=ifn, a=0, b=self.r_0)[0]
+        return self._norm_u2(l=l, n=n)
 
     def _p_l(self, l, mu, nu):
         muk = mu
