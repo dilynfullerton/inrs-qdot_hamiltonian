@@ -99,6 +99,8 @@ class HamiltonianQD(RootSolverComplex2d):
         The returned result should be real.
         """
         mu_n = self.mu_nl(n=n, l=l)
+        if mu_n is None:
+            return lambda r: 0  # TODO find a better way
         ediv = self._eps_div
         dj_mu = _j(l, d=1)(mu_n)
         j_mu = _j(l)(mu_n)
@@ -245,7 +247,7 @@ class HamiltonianQD(RootSolverComplex2d):
         if (l, n) in self._roots_mu:
             return self._roots_mu[l, n]
         else:
-            raise RuntimeError  # TODO
+            return None  # TODO
 
     def _nu2(self, mu2):
         mu2 = complex(mu2)
@@ -272,12 +274,11 @@ class HamiltonianQD(RootSolverComplex2d):
         ax.axhline(0, color='gray', lw=1, alpha=.5)
 
         for n in range(self.num_n):
-            try:
-                mu = self.mu_nl(l=l, n=n)
-                ax.axvline(mu.real-self.low_mu, ls='--', color='green',
-                           lw=1, alpha=.5)
-            except RuntimeError:
-                print('crap')
+            mu = self.mu_nl(l=l, n=n)
+            if mu is None:
+                continue  # TODO
+            ax.axvline(mu.real-self.low_mu, ls='--', color='green',
+                       lw=1, alpha=.5)
 
         ydat = np.array([fpr(x) for x in mudat])
         ydat /= lin.norm(ydat, ord=2)

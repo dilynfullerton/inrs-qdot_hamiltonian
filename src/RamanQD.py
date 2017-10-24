@@ -135,10 +135,10 @@ class RamanQD(RootSolverComplex2d):
                  expected_roots_x_lj, num_n=None, num_l=None,
                  verbose=False):
         # Model constants
-        self.hamiltonian = hamiltonian
-        self.ms = ModelSpaceElectronHolePair(num_n=self.num_n)
         self.num_n = num_n
         self.num_l = num_l
+        self.hamiltonian = hamiltonian
+        self.ms = ModelSpaceElectronHolePair(num_n=self.num_n)
         if self.num_n is None:
             self.num_n = self.hamiltonian.num_n
         if self.num_l is None:
