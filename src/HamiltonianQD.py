@@ -88,11 +88,18 @@ class HamiltonianQD(RootSolverComplex2d):
         h = 0
         for l, m, n in self.iter_lmn():
             h += (
-                self.r_0 * self.C_F * np.sqrt(4*np.pi/3) *
-                self.Phi_ln(l=l, n=n)(r) * Y_lm(l=l, m=m)(theta, phi) *
+                self._H_ep_rad_ln(l=l, n=n)(r) * Y_lm(l=l, m=m)(theta, phi) *
                 self._b(l=l, m=m, n=n)
             )
         return 1/2 * (h + h.dag())
+
+    def _H_ep_rad_ln(self, l, n):
+        def hrfn(r):
+            return (
+                self.r_0 * self.C_F * np.sqrt(4*np.pi/3) *
+                self.Phi_ln(l=l, n=n)(r)
+            )
+        return hrfn
 
     def Phi_ln(self, l, n):
         """See Roca (43) and Riera (60)
@@ -119,7 +126,7 @@ class HamiltonianQD(RootSolverComplex2d):
                     (-mu_n * dj_mu + l * ediv * j_mu) *
                     (r0/r)**(l+1) / (l + (l + 1) * ediv)
                 )
-            return complex(phicplx).real
+            return complex(phicplx).real  # TODO: Should this be here?
         return phifn
 
     def _b(self, l, m, n):

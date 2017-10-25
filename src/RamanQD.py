@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 from scipy import integrate as integ
 from scipy import linalg as lin
 
-from helper_functions import J, K, basis_pmz, basis_spherical, threej
+from helper_functions import J, K, basis_pmz, basis_spherical, threej, Y_lm
 from root_solver_2d import RootSolverComplex2d
 
 __all__ = ['ModelSpaceElectronHolePair', 'RamanQD']
@@ -128,12 +128,33 @@ class ModelSpaceElectronHolePair:
 
 
 class RamanQD(RootSolverComplex2d):
-    def __init__(self, hamiltonian, unit_cell, refidx,
-                 V1, V2, E_g, mu_i1, mu_i2, mu_01, mu_02,
-                 free_electron_mass,
-                 Gamma_f, Gamma_a1, Gamma_a2, Gamma_b1, Gamma_b2,
-                 expected_roots_x_lj, num_n=None, num_l=None,
-                 verbose=False):
+    def __init__(
+            self, hamiltonian,
+            V_v, V_c, E_gap, m_eff_e, m_eff_h, m_e, m_h,
+            Gamma_f, Gamma_a_v, Gamma_a_c, Gamma_b_v, Gamma_b_c,
+            expected_roots_x_lj, num_n=None, num_l=None, verbose=False
+    ):
+        """
+        :param hamiltonian: HamiltonainQD object representing the QD
+        :param V_v: Effective potential (?) of the valence band
+        :param V_c: Effective potential (?) of the conduction band
+        :param E_gap: Gap energy between conduction and valence bands
+        :param m_eff_e: Effective electron mass in nanostructures
+        :param m_eff_h: Effective hole mass in nanostructures
+        :param m_e: Free electron mass
+        :param m_h: Free hole mass
+        :param Gamma_f: Final state lifetime
+        :param Gamma_a_v: Intermediate 'a' state lifetime in valence band
+        :param Gamma_a_c: Intermediate 'a' state lifetime in conduction band
+        :param Gamma_b_v: Intermediate 'b' state lifetime in valence band
+        :param Gamma_b_c: Intermediate 'b' state lifetime in conduction band
+        :param expected_roots_x_lj: A dictionary matching (l, j) to an
+        ordered list of expected x_lnj, where j is 1 (electron) or 2 (hole)
+        :param num_n: Number of modes to solve for and include in calculations.
+        :param num_l: Number of angular momentum states to solve for an
+        include in calcuations
+        :param verbose: If true, prints some output
+        """
         # Model constants
         self.num_n = num_n
         self.num_l = num_l
@@ -145,27 +166,21 @@ class RamanQD(RootSolverComplex2d):
             self.num_l = self.hamiltonian.num_l
 
         # j-dependent physical constants
-        self._V_j = [V1, V2]
-        self._Gamma_aj = [Gamma_a1, Gamma_a2]
-        self._Gamma_bj = [Gamma_b1, Gamma_b2]
-        self._mu_ij = [mu_i1, mu_i2]  # QDOT effective mass?
-        self._mu_0j = [mu_01, mu_02]  # Environment effective mass
+        self._V_j = [V_v, V_c]
+        self._Gamma_aj = [Gamma_a_v, Gamma_a_c]
+        self._Gamma_bj = [Gamma_b_v, Gamma_b_c]
+        self._mu_ij = [m_eff_e, m_eff_h]  # Effective electron (hole) mass in QD
+        self._mu_0j = [m_e, m_h]  # Free electron (hole) mass
 
         # Physical constants
-        self._a_matrix = unit_cell
-        self.E_g = E_g  # Gap energy
-        self.mu_0 = free_electron_mass  # Free electron mass
-        self.Gamma_f = Gamma_f
-
-        # Functions
-        self.eta = refidx  # omega -> refractive index
+        self.E_g = E_gap  # Gap energy
 
         # Derived/inherited physical constants
         self.e = abs(self.hamiltonian.electron_charge)
         self.r_0 = self.hamiltonian.r_0
         self.mu_r = 1/(1 / self.mu_ij(1) + 1 / self.mu_ij(2))  # Riera (92)
         self.E_0 = 1 / 2 / self.mu_r / self.r_0**2  # Riera (151)
-        self.delta_f = self.Gamma_f / self.E_0  # Riera (152)
+        self.delta_f = Gamma_f / self.E_0  # Riera (152)
         self.V = 4/3 * np.pi * self.r_0**2  # QD Volume
         self._p_cv0 = None
 
@@ -178,7 +193,10 @@ class RamanQD(RootSolverComplex2d):
         # Matrix elements
         self._mat_elts = dict()
         self._mat_elts_ph = dict()
+
         self._intS = dict()
+        self._I_dict = dict()
+        self._II_dict = dict()
 
         # Other
         self.verbose = verbose
@@ -434,6 +452,27 @@ class RamanQD(RootSolverComplex2d):
     def get_numbers(self, state):
         return state[0]
 
+    def _Psi_rad_lnj(self, l, n, j):
+        A, B = self._A_B(l=l, n=n, j=j)
+        x = self.x(j=j, l=l, n=n)
+        y = self.y(j=j, l=l, n=n)
+
+        def psifn(r):
+            if r <= self.r_0:
+                return A / np.sqrt(r) * J(l=l+1/2)(x * r / self.r_0)
+            else:
+                return B / np.sqrt(r) * K(l=l+1/2)(y * r / self.r_0)
+        return psifn
+
+    def _Psi_ang_lm(self, l, m):
+        return Y_lm(l=l, m=m)
+
+    def Psi_lmnj(self, l, m, n, j):
+        def psifn(r, theta, phi):
+            return (self._Psi_rad_lnj(l=l, n=n, j=j)(r) * self.u_j(j=j)(r) *
+                    self._Psi_ang_lm(l=l, m=m)(theta, phi))
+        return psifn
+
     # -- Getters --
     def S(self, p, e_s):
         """Polarization S_p. See Riera (149)
@@ -480,49 +519,49 @@ class RamanQD(RootSolverComplex2d):
         g2 = self.g2(x1=xa1, x2=xa2, omega_l=omega_l, omega_s=omega_s)
         return g2 - omega_q / self.E_0
 
-    def p_cv0(self):
-        """Momentum between valence and conduction bands, at k=0.
-         See Riera (78).
-        """
-        if self._p_cv0 is not None:
-            return self._p_cv0
-
-        # The unit cell is defined by 3 vectors: a1, a2, a3, which
-        # are the columns of...
-        a_matrix = self._a_matrix
-
-        # The function to integrate (in terms of the unit cell basis) is
-        def intfn(c1, c2, c3, i):
-            # Get position in cartesian basis
-            x = np.dot(a_matrix, np.array([c1, c2, c3]))
-            r = lin.norm(x, ord=2)
-            # Evaluate u1 and u2 at r
-            # TODO In Riera, this is written conj(u1'), but I don't know
-            # what the prime is for
-            u1_conj = np.conj(self.u_j(j=1)(r=r))
-            du2 = self.u_j(j=2)(r=r, d_r=1)
-            pu2 = x / r * du2
-            return (u1_conj * pu2)[i]
-
-        # Integrate real and imaginary parts separately
-        def ifnr(c1, c2, c3, xi):
-            return np.real(intfn(c1, c2, c3, i=xi))
-
-        def ifni(c1, c2, c3, xi):
-            return np.imag(intfn(c1, c2, c3, i=xi))
-
-        # The integral is performed over the unit cell volume, 0 to 1 in
-        # each coordinate
-        x_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=(0,))[0]
-        x_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=(0,))[0]
-        y_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=(1,))[0]
-        y_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=(1,))[0]
-        z_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=(2,))[0]
-        z_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=(2,))[0]
-        re = np.array([x_re, y_re, z_re])
-        im = np.array([x_im, y_im, z_im])
-        self._p_cv0 = re + 1j * im
-        return self.p_cv0()
+    # def p_cv0(self):
+    #     """Momentum between valence and conduction bands, at k=0.
+    #      See Riera (78).
+    #     """
+    #     if self._p_cv0 is not None:
+    #         return self._p_cv0
+    #
+    #     # The unit cell is defined by 3 vectors: a1, a2, a3, which
+    #     # are the columns of...
+    #     a_matrix = self._a_matrix
+    #
+    #     # The function to integrate (in terms of the unit cell basis) is
+    #     def intfn(c1, c2, c3, i):
+    #         # Get position in cartesian basis
+    #         x = np.dot(a_matrix, np.array([c1, c2, c3]))
+    #         r = lin.norm(x, ord=2)
+    #         # Evaluate u1 and u2 at r
+    #         # TODO In Riera, this is written conj(u1'), but I don't know
+    #         # what the prime is for
+    #         u1_conj = np.conj(self.u_j(j=1)(r=r))
+    #         du2 = self.u_j(j=2)(r=r, d_r=1)
+    #         pu2 = x / r * du2
+    #         return (u1_conj * pu2)[i]
+    #
+    #     # Integrate real and imaginary parts separately
+    #     def ifnr(c1, c2, c3, xi):
+    #         return np.real(intfn(c1, c2, c3, i=xi))
+    #
+    #     def ifni(c1, c2, c3, xi):
+    #         return np.imag(intfn(c1, c2, c3, i=xi))
+    #
+    #     # The integral is performed over the unit cell volume, 0 to 1 in
+    #     # each coordinate
+    #     x_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=(0,))[0]
+    #     x_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=(0,))[0]
+    #     y_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=(1,))[0]
+    #     y_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=(1,))[0]
+    #     z_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=(2,))[0]
+    #     z_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=(2,))[0]
+    #     re = np.array([x_re, y_re, z_re])
+    #     im = np.array([x_im, y_im, z_im])
+    #     self._p_cv0 = re + 1j * im
+    #     return self.p_cv0()
 
     def u_j(self, j):
         """Bloch function. I have not found the definition for this in
@@ -532,16 +571,16 @@ class RamanQD(RootSolverComplex2d):
             return 1  # TODO
         return ujfn
 
-    def sigma_0(self, omega_s, omega_l, e_l):
-        """See Riera (104)
-        """
-        return (
-            (4*np.sqrt(2) * self.V * self.e**4 *
-             abs(np.dot(e_l, self.p_cv0()).sum())**2 * self.eta(omega_s) *
-             self.mu_r**(1/2) * self.E_0**(3/2)) /
-            (9*np.pi**2 * self.mu_0**2 * self.eta(omega_l) *
-             omega_l * omega_s)
-        )
+    # def sigma_0(self, omega_s, omega_l, e_l):
+    #     """See Riera (104)
+    #     """
+    #     return (
+    #         (4*np.sqrt(2) * self.V * self.e**4 *
+    #          abs(np.dot(e_l, self.p_cv0()).sum())**2 * self.eta(omega_s) *
+    #          self.mu_r**(1/2) * self.E_0**(3/2)) /
+    #         (9 * np.pi ** 2 * self.m_e ** 2 * self.eta(omega_l) *
+    #          omega_l * omega_s)
+    #     )
 
     def Gamma_aj(self, j):
         return self._Gamma_aj[j-1]
@@ -563,31 +602,51 @@ class RamanQD(RootSolverComplex2d):
         """
         return self.mu_r / self.mu_ij(j)
 
-    # -- Coupling tensors --
+    # -- Matrix element integrals --
     def I(self, lb, nb, la, na, j):
-        r0 = self.r_0
+        """Returns the radial part of the matrix element
+        <la ma na | lb mb nb>, obtained by integrating
+        R_ln^dag R_ln from r = 0 to r = inf
+        :param j: 1 (electron) or 2 (hole)
+        """
+        if (lb, nb) > (la, na):
+            return np.conj(self.I(lb=la, nb=na, la=lb, na=nb, j=j))
+        elif (lb, nb, la, na, j) in self._I_dict:
+            return self._I_dict[lb, nb, la, na, j]
+        psi_rb = self._Psi_rad_lnj(l=lb, n=nb, j=j)
+        psi_ra = self._Psi_rad_lnj(l=la, n=na, j=j)
 
-        xa = self.x(l=la, n=na, j=j)
-        xb = self.x(l=lb, n=nb, j=j)
+        def ifn(r):
+            return complex(np.conj(psi_ra(r)) * psi_rb(r) * r**2)
+        ans_re = integ.quad(lambda x: ifn(x).real, a=0, b=np.inf)[0]
+        ans_im = integ.quad(lambda x: ifn(x).imag, a=0, b=np.inf)[0]
+        ans = ans_re + 1j * ans_im
+        self._I_dict[lb, nb, la, na, j] = ans
+        return self.I(lb=lb, nb=nb, la=la, na=na, j=j)
 
-        def ifn_j(r):
-            return J(la+1/2)(z=xa*r/r0) * J(lb+1/2)(z=xb*r/r0) * r
-        ans_j_re = integ.quad(lambda x: ifn_j(x).real, a=0, b=self.r_0)[0]
-        ans_j_im = integ.quad(lambda x: ifn_j(x).imag, a=0, b=self.r_0)[0]
-        ans_j = ans_j_re + 1j * ans_j_im
-
-        ya = self.y(l=la, n=na, j=j)
-        yb = self.y(l=lb, n=nb, j=j)
-
-        def ifn_k(r):
-            return K(la+1/2)(z=ya*r/r0) * K(lb+1/2)(z=yb*r/r0) * r
-        ans_k_re = integ.quad(lambda x: ifn_k(x).real, a=self.r_0, b=np.inf)[0]
-        ans_k_im = integ.quad(lambda x: ifn_k(x).imag, a=self.r_0, b=np.inf)[0]
-        ans_k = ans_k_re + 1j * ans_k_im
-
-        Aa, Ba = self._A_B(l=la, n=na, j=j)
-        Ab, Bb = self._A_B(l=lb, n=nb, j=j)
-        return Aa * Ab * ans_j + Ba * Bb * ans_k
+        # r0 = self.r_0
+        #
+        # xa = self.x(l=la, n=na, j=j)
+        # xb = self.x(l=lb, n=nb, j=j)
+        #
+        # def ifn_j(r):
+        #     return J(la+1/2)(z=xa*r/r0) * J(lb+1/2)(z=xb*r/r0) * r
+        # ans_j_re = integ.quad(lambda x: ifn_j(x).real, a=0, b=self.r_0)[0]
+        # ans_j_im = integ.quad(lambda x: ifn_j(x).imag, a=0, b=self.r_0)[0]
+        # ans_j = ans_j_re + 1j * ans_j_im
+        #
+        # ya = self.y(l=la, n=na, j=j)
+        # yb = self.y(l=lb, n=nb, j=j)
+        #
+        # def ifn_k(r):
+        #     return K(la+1/2)(z=ya*r/r0) * K(lb+1/2)(z=yb*r/r0) * r
+        # ans_k_re = integ.quad(lambda x: ifn_k(x).real, a=self.r_0, b=np.inf)[0]
+        # ans_k_im = integ.quad(lambda x: ifn_k(x).imag, a=self.r_0, b=np.inf)[0]
+        # ans_k = ans_k_re + 1j * ans_k_im
+        #
+        # Aa, Ba = self._A_B(l=la, n=na, j=j)
+        # Ab, Bb = self._A_B(l=lb, n=nb, j=j)
+        # return Aa * Ab * ans_j + Ba * Bb * ans_k
 
     def T(self, l, na, nb, j):
         """See Riera (134). Using nu=1/2 always.
@@ -597,43 +656,61 @@ class RamanQD(RootSolverComplex2d):
     def II(self, lbj, nbj, lcj, ncj, la, na, j):
         """See Riera (210). Note: In Riera (210), the 'y' given to K is
         'x', but I don't think that is correct.
+
+        Returns the radial part of the matrix element
+        < nb lb mb | H_ph_na,la,ma | nc lb mb >
         """
-        r0 = self.r_0
+        if (lbj, nbj) > (lcj, ncj):
+            return np.conj(self.II(lbj=lcj, nbj=ncj,
+                                   lcj=lbj, ncj=nbj,
+                                   la=la, na=na, j=j))
+        elif (lbj, nbj, lcj, ncj, la, na, j) in self._II_dict:
+            return self._II_dict[lbj, nbj, lcj, ncj, la, na, j]
+
+        psi_rb = self._Psi_rad_lnj(l=lbj, n=nbj, j=j)
+        psi_rc = self._Psi_rad_lnj(l=lcj, n=ncj, j=j)
         Phi_ln = self.hamiltonian.Phi_ln(l=la, n=na)
 
-        xb = self.x(l=lbj, n=nbj, j=j)
-        xc = self.x(l=lcj, n=ncj, j=j)
+        def ifn(r):
+            return complex(np.conj(psi_rb(r)) * Phi_ln(r) * psi_rc(r))
+        result_re = integ.quad(lambda x: ifn(x).real, 0, np.inf)[0]
+        result_im = integ.quad(lambda x: ifn(x).imag, 0, np.inf)[0]
+        result = result_re + 1j * result_im
+        self._II_dict[lbj, nbj, lcj, ncj, la, na, j] = result
+        return self.II(lbj=lbj, nbj=nbj, lcj=lcj, ncj=ncj, la=la, na=na, j=j)
 
-        def ifnj(r):
-            return (
-                J(lbj+1/2)(xb * r / r0) * Phi_ln(r) *
-                J(lcj+1/2)(xc * r / r0) * r
-            )
-        resultj_re = integ.quad(lambda x: ifnj(x).real, 0, r0)[0]
-        resultj_im = integ.quad(lambda x: ifnj(x).imag, 0, r0)[0]
-        resultj = resultj_re + 1j * resultj_im
-
-        yb = self.y(l=lbj, n=nbj, j=j)
-        yc = self.y(l=lcj, n=ncj, j=j)
-
-        def ifnk(r):
-            return (
-                K(lbj+1/2)(yb * r / r0) * Phi_ln(r) *
-                K(lcj+1/2)(yc * r / r0) * r
-
-            )
-        # TODO: Should the upper bound here be 0 or inf?
-        resultk_re = integ.quad(lambda x: ifnk(x).real, r0, np.inf)[0]
-        resultk_im = integ.quad(lambda x: ifnk(x).imag, r0, np.inf)[0]
-        resultk = resultk_re + 1j * resultk_im
-
-        Ab, Bb = self._A_B(l=lbj, n=nbj, j=j)
-        Ac, Bc = self._A_B(l=lcj, n=ncj, j=j)
-        return Ab * Ac * resultj + Bb * Bc * resultk
-
-    def _Jl_Kl(self, l, n, j):
-        return (J(l=l+1/2)(self.x(l=l, n=n, j=j)),
-                K(l=l+1/2)(self.y(l=l, n=n, j=j)))
+        # r0 = self.r_0
+        # Phi_ln = self.hamiltonian.Phi_ln(l=la, n=na)
+        #
+        # xb = self.x(l=lbj, n=nbj, j=j)
+        # xc = self.x(l=lcj, n=ncj, j=j)
+        #
+        # def ifnj(r):
+        #     return (
+        #         J(lbj+1/2)(xb * r / r0) * Phi_ln(r) *
+        #         J(lcj+1/2)(xc * r / r0) * r
+        #     )
+        # resultj_re = integ.quad(lambda x: ifnj(x).real, 0, r0)[0]
+        # resultj_im = integ.quad(lambda x: ifnj(x).imag, 0, r0)[0]
+        # resultj = resultj_re + 1j * resultj_im
+        #
+        # yb = self.y(l=lbj, n=nbj, j=j)
+        # yc = self.y(l=lcj, n=ncj, j=j)
+        #
+        # def ifnk(r):
+        #     return (
+        #         K(lbj+1/2)(yb * r / r0) * Phi_ln(r) *
+        #         K(lcj+1/2)(yc * r / r0) * r
+        #
+        #     )
+        # # TODO: Should the upper bound here be 0 or inf?
+        # resultk_re = integ.quad(lambda x: ifnk(x).real, r0, np.inf)[0]
+        # resultk_im = integ.quad(lambda x: ifnk(x).imag, r0, np.inf)[0]
+        # resultk = resultk_re + 1j * resultk_im
+        #
+        # Ab, Bb = self._A_B(l=lbj, n=nbj, j=j)
+        # Ac, Bc = self._A_B(l=lcj, n=ncj, j=j)
+        # return Ab * Ac * resultj + Bb * Bc * resultk
 
     def _A_B(self, l, n, j):
         Jln = J(l=l+1/2)(self.x(l=l, n=n, j=j))

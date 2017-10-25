@@ -18,18 +18,18 @@ class TestRamanQD(TestCase):
             unit_cell=LATTICE_CONST_GaAs * np.eye(3, 3),
             refidx=lambda w: REFIDX_GaAs,
             radius=5.0,  # [nm]
-            V1=1280.82844,  # [nm]
-            V2=1921.34190,  # [nm]
-            E_g=816.92161,  # [nm]
-            mu_i1=.0665,  # [mu_0]
-            mu_i2=.45,  # [mu_0]
-            mu_01=1,  # [mu_0]
-            mu_02=1,  # [mu_0]
+            V_v=1280.82844,  # [nm]
+            V_c=1921.34190,  # [nm]
+            E_gap=816.92161,  # [nm]
+            m_eff_e=.0665,  # [m_e]
+            m_eff_h=.45,  # [m_e]
+            m_e=1,  # [m_e]
+            m_h=1,  # [m_e]
             electron_charge=ELECTRON_CHARGE,
-            free_electron_mass=FREE_ELECTRON_MASS,
+            m_e=FREE_ELECTRON_MASS,
             Gamma_f=gamma_a1*3,
-            Gamma_a1=gamma_a1,
-            Gamma_a2=gamma_a1,
+            Gamma_a_v=gamma_a1,
+            Gamma_a_c=gamma_a1,
             expected_roots_x_lj={
                 (0, 1): [.001, 3.0, 5.86, 8.9],
                 (0, 2): [.001, 3.1, 6.2462, 9.4],

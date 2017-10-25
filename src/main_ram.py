@@ -71,23 +71,20 @@ plt.show()
 
 QD_GaAs_RAMAN = RamanQD(
     hamiltonian=QD_GaAs_HAM,
-    unit_cell=LATTICE_CONST_GaAs * np.eye(3, 3),
-    refidx=lambda w: REFIDX_GaAs,
-    V1=2.5,  # [eV]
-    V2=1.9,  # [eV]
-    E_g=2.6,  # [eV]
+    V_v=2.5,  # [eV]
+    V_c=1.9,  # [eV]
+    E_gap=2.6,  # [eV]
     # mu_i1=.18 * FREE_ELECTRON_MASS,
     # mu_i2=.51 * FREE_ELECTRON_MASS,
-    mu_i1=1.8 * FREE_ELECTRON_MASS,
-    mu_i2=5.1 * FREE_ELECTRON_MASS,
-    mu_01=FREE_ELECTRON_MASS,
-    mu_02=FREE_ELECTRON_MASS,
-    free_electron_mass=FREE_ELECTRON_MASS,
+    m_eff_e=1.8 * FREE_ELECTRON_MASS,
+    m_eff_h=5.1 * FREE_ELECTRON_MASS,
+    m_e=FREE_ELECTRON_MASS,
+    m_h=FREE_ELECTRON_MASS,
     Gamma_f=GAMMA_A1*3,
-    Gamma_a1=GAMMA_A1,
-    Gamma_a2=GAMMA_A1,
-    Gamma_b1=GAMMA_A1,
-    Gamma_b2=GAMMA_A1,
+    Gamma_a_v=GAMMA_A1,
+    Gamma_a_c=GAMMA_A1,
+    Gamma_b_v=GAMMA_A1,
+    Gamma_b_c=GAMMA_A1,
     expected_roots_x_lj={
         # (0, 1): [.001, 2.79, 5.36],
         # (0, 2): [.001, 3.00, 5.94, 8.34],
