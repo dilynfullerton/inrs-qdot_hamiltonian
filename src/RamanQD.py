@@ -613,40 +613,45 @@ class RamanQD(RootSolverComplex2d):
             return np.conj(self.I(lb=la, nb=na, la=lb, na=nb, j=j))
         elif (lb, nb, la, na, j) in self._I_dict:
             return self._I_dict[lb, nb, la, na, j]
-        psi_rb = self._Psi_rad_lnj(l=lb, n=nb, j=j)
-        psi_ra = self._Psi_rad_lnj(l=la, n=na, j=j)
 
-        def ifn(r):
-            return complex(np.conj(psi_ra(r)) * psi_rb(r) * r**2)
-        ans_re = integ.quad(lambda x: ifn(x).real, a=0, b=np.inf)[0]
-        ans_im = integ.quad(lambda x: ifn(x).imag, a=0, b=np.inf)[0]
-        ans = ans_re + 1j * ans_im
+        # psi_rb = self._Psi_rad_lnj(l=lb, n=nb, j=j)
+        # psi_ra = self._Psi_rad_lnj(l=la, n=na, j=j)
+        #
+        # def ifn(r):
+        #     return complex(np.conj(psi_ra(r)) * psi_rb(r) * r**2)
+        # ans_re1 = integ.quad(lambda x: ifn(x).real, a=0, b=self.r_0)[0]
+        # ans_im1 = integ.quad(lambda x: ifn(x).imag, a=0, b=self.r_0)[0]
+        # ans_re2 = integ.quad(lambda x: ifn(x).real, a=self.r_0, b=np.inf)[0]
+        # ans_im2 = integ.quad(lambda x: ifn(x).imag, a=self.r_0, b=np.inf)[0]
+        # ans = ans_re1 + ans_re2 + 1j * (ans_im1 + ans_im2)
+        # self._I_dict[lb, nb, la, na, j] = ans
+        # return self.I(lb=lb, nb=nb, la=la, na=na, j=j)
+
+        r0 = self.r_0
+
+        def ifn_j(r):
+            xa = self.x(l=la, n=na, j=j)
+            xb = self.x(l=lb, n=nb, j=j)
+            return np.conj(J(la+1/2)(z=xa*r/r0)) * J(lb+1/2)(z=xb*r/r0) * r
+
+        def ifn_k(r):
+            ya = self.y(l=la, n=na, j=j)
+            yb = self.y(l=lb, n=nb, j=j)
+            return np.conj(K(la+1/2)(z=ya*r/r0)) * K(lb+1/2)(z=yb*r/r0) * r
+
+        ans_j_re = integ.quad(lambda x: ifn_j(x).real, a=0, b=self.r_0)[0]
+        ans_j_im = integ.quad(lambda x: ifn_j(x).imag, a=0, b=self.r_0)[0]
+        ans_j = ans_j_re + 1j * ans_j_im
+
+        ans_k_re = integ.quad(lambda x: ifn_k(x).real, a=self.r_0, b=np.inf)[0]
+        ans_k_im = integ.quad(lambda x: ifn_k(x).imag, a=self.r_0, b=np.inf)[0]
+        ans_k = ans_k_re + 1j * ans_k_im
+
+        Aa, Ba = self._A_B(l=la, n=na, j=j)
+        Ab, Bb = self._A_B(l=lb, n=nb, j=j)
+        ans = Aa * Ab * ans_j + Ba * Bb * ans_k
         self._I_dict[lb, nb, la, na, j] = ans
         return self.I(lb=lb, nb=nb, la=la, na=na, j=j)
-
-        # r0 = self.r_0
-        #
-        # xa = self.x(l=la, n=na, j=j)
-        # xb = self.x(l=lb, n=nb, j=j)
-        #
-        # def ifn_j(r):
-        #     return J(la+1/2)(z=xa*r/r0) * J(lb+1/2)(z=xb*r/r0) * r
-        # ans_j_re = integ.quad(lambda x: ifn_j(x).real, a=0, b=self.r_0)[0]
-        # ans_j_im = integ.quad(lambda x: ifn_j(x).imag, a=0, b=self.r_0)[0]
-        # ans_j = ans_j_re + 1j * ans_j_im
-        #
-        # ya = self.y(l=la, n=na, j=j)
-        # yb = self.y(l=lb, n=nb, j=j)
-        #
-        # def ifn_k(r):
-        #     return K(la+1/2)(z=ya*r/r0) * K(lb+1/2)(z=yb*r/r0) * r
-        # ans_k_re = integ.quad(lambda x: ifn_k(x).real, a=self.r_0, b=np.inf)[0]
-        # ans_k_im = integ.quad(lambda x: ifn_k(x).imag, a=self.r_0, b=np.inf)[0]
-        # ans_k = ans_k_re + 1j * ans_k_im
-        #
-        # Aa, Ba = self._A_B(l=la, n=na, j=j)
-        # Ab, Bb = self._A_B(l=lb, n=nb, j=j)
-        # return Aa * Ab * ans_j + Ba * Bb * ans_k
 
     def T(self, l, na, nb, j):
         """See Riera (134). Using nu=1/2 always.
@@ -667,50 +672,53 @@ class RamanQD(RootSolverComplex2d):
         elif (lbj, nbj, lcj, ncj, la, na, j) in self._II_dict:
             return self._II_dict[lbj, nbj, lcj, ncj, la, na, j]
 
-        psi_rb = self._Psi_rad_lnj(l=lbj, n=nbj, j=j)
-        psi_rc = self._Psi_rad_lnj(l=lcj, n=ncj, j=j)
-        Phi_ln = self.hamiltonian.Phi_ln(l=la, n=na)
-
-        def ifn(r):
-            return complex(np.conj(psi_rb(r)) * Phi_ln(r) * psi_rc(r))
-        result_re = integ.quad(lambda x: ifn(x).real, 0, np.inf)[0]
-        result_im = integ.quad(lambda x: ifn(x).imag, 0, np.inf)[0]
-        result = result_re + 1j * result_im
-        self._II_dict[lbj, nbj, lcj, ncj, la, na, j] = result
-        return self.II(lbj=lbj, nbj=nbj, lcj=lcj, ncj=ncj, la=la, na=na, j=j)
-
-        # r0 = self.r_0
+        # psi_rb = self._Psi_rad_lnj(l=lbj, n=nbj, j=j)
+        # psi_rc = self._Psi_rad_lnj(l=lcj, n=ncj, j=j)
         # Phi_ln = self.hamiltonian.Phi_ln(l=la, n=na)
         #
-        # xb = self.x(l=lbj, n=nbj, j=j)
-        # xc = self.x(l=lcj, n=ncj, j=j)
-        #
-        # def ifnj(r):
-        #     return (
-        #         J(lbj+1/2)(xb * r / r0) * Phi_ln(r) *
-        #         J(lcj+1/2)(xc * r / r0) * r
-        #     )
-        # resultj_re = integ.quad(lambda x: ifnj(x).real, 0, r0)[0]
-        # resultj_im = integ.quad(lambda x: ifnj(x).imag, 0, r0)[0]
-        # resultj = resultj_re + 1j * resultj_im
-        #
-        # yb = self.y(l=lbj, n=nbj, j=j)
-        # yc = self.y(l=lcj, n=ncj, j=j)
-        #
-        # def ifnk(r):
-        #     return (
-        #         K(lbj+1/2)(yb * r / r0) * Phi_ln(r) *
-        #         K(lcj+1/2)(yc * r / r0) * r
-        #
-        #     )
-        # # TODO: Should the upper bound here be 0 or inf?
-        # resultk_re = integ.quad(lambda x: ifnk(x).real, r0, np.inf)[0]
-        # resultk_im = integ.quad(lambda x: ifnk(x).imag, r0, np.inf)[0]
-        # resultk = resultk_re + 1j * resultk_im
-        #
-        # Ab, Bb = self._A_B(l=lbj, n=nbj, j=j)
-        # Ac, Bc = self._A_B(l=lcj, n=ncj, j=j)
-        # return Ab * Ac * resultj + Bb * Bc * resultk
+        # def ifn(r):
+        #     return complex(np.conj(psi_rb(r)) * Phi_ln(r) * psi_rc(r) * r**2)
+        # result_re1 = integ.quad(lambda x: ifn(x).real, 0, self.r_0)[0]
+        # result_im1 = integ.quad(lambda x: ifn(x).imag, 0, self.r_0)[0]
+        # result_re2 = integ.quad(lambda x: ifn(x).real, self.r_0, np.inf)[0]
+        # result_im2 = integ.quad(lambda x: ifn(x).imag, self.r_0, np.inf)[0]
+        # result = result_re1 + result_re2 + 1j * (result_im1 + result_im2)
+        # self._II_dict[lbj, nbj, lcj, ncj, la, na, j] = result
+        # return self.II(lbj=lbj, nbj=nbj, lcj=lcj, ncj=ncj, la=la, na=na, j=j)
+
+        r0 = self.r_0
+        Phi_ln = self.hamiltonian.Phi_ln(l=la, n=na)
+
+        def ifnj(r):
+            xb = self.x(l=lbj, n=nbj, j=j)
+            xc = self.x(l=lcj, n=ncj, j=j)
+            return (
+                np.conj(J(lbj+1/2)(xb * r / r0)) * Phi_ln(r) *
+                J(lcj+1/2)(xc * r / r0) * r
+            )
+
+        def ifnk(r):
+            yb = self.y(l=lbj, n=nbj, j=j)
+            yc = self.y(l=lcj, n=ncj, j=j)
+            return (
+                np.conj(K(lbj+1/2)(yb * r / r0)) * Phi_ln(r) *
+                K(lcj+1/2)(yc * r / r0) * r
+
+            )
+
+        resultj_re = integ.quad(lambda x: ifnj(x).real, 0, r0)[0]
+        resultj_im = integ.quad(lambda x: ifnj(x).imag, 0, r0)[0]
+        resultj = resultj_re + 1j * resultj_im
+
+        resultk_re = integ.quad(lambda x: ifnk(x).real, r0, np.inf)[0]
+        resultk_im = integ.quad(lambda x: ifnk(x).imag, r0, np.inf)[0]
+        resultk = resultk_re + 1j * resultk_im
+
+        Ab, Bb = self._A_B(l=lbj, n=nbj, j=j)
+        Ac, Bc = self._A_B(l=lcj, n=ncj, j=j)
+        result = Ab * Ac * resultj + Bb * Bc * resultk
+        self._II_dict[lbj, nbj, lcj, ncj, la, na, j] = result
+        return self.II(lbj=lbj, nbj=nbj, lcj=lcj, ncj=ncj, la=la, na=na, j=j)
 
     def _A_B(self, l, n, j):
         Jln = J(l=l+1/2)(self.x(l=l, n=n, j=j))

@@ -7,9 +7,9 @@ The definitions used in the theoretical model are based on
 
 Electron Raman Scattering in Nanostructures
 R. Betancourt-Riera, R. Riera, J. L. Marin
-Centro de Investigación en Física, Universidad de Sonora, 83190 Hermosillo, Sonora, México
+Centro de Investigacion en Fisica, Universidad de Sonora, 83190 Hermosillo, Sonora, Mexico
 R. Rosas
-Departamento de Física, Universidad de Sonora, 83000 Hermosillo, Sonora, México
+Departamento de Fisica, Universidad de Sonora, 83000 Hermosillo, Sonora, Mexico
 """
 import itertools as it
 from math import pi

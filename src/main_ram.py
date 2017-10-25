@@ -126,14 +126,16 @@ QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=2, xdat=XDAT_X, show=True)
 e_l = np.array([1, 0, 0])  # incident polarization
 # omega_l = 10  # incident energy [eV]
 omega_l = 2.4  # incident energy [eV]
+# omega_l = .03782
 e_s = np.array([0, 0, 1])  # secondary polarization
 
-xdat = np.linspace(1e-4, 20, 101)
+xdat = np.linspace(1e-4, 1, 101)
 ydatr = np.empty_like(xdat)
 ydati = np.empty_like(xdat)
 for x, i in zip(xdat, it.count()):
-    omega_s = QD_GaAs_RAMAN.E_0 * x
-    # omega_s = x
+    # omega_s = omega_l - x
+    # omega_s = QD_GaAs_RAMAN.E_0 * x
+    omega_s = x
     cross_sec = QD_GaAs_RAMAN.differential_raman_efficiency(
         omega_l=omega_l, e_l=e_l, omega_s=omega_s,
         # e_s=e_s,
@@ -144,6 +146,12 @@ for x, i in zip(xdat, it.count()):
     ydati[i] = cross_sec.imag
 
 fig, ax = plt.subplots(1, 1)
+
 ax.plot(xdat, ydatr, '-', color='red')
 ax.plot(xdat, ydati, '-', color='blue')
+
+# ax.axvline(QD_GaAs_HAM.omega_L / QD_GaAs_RAMAN.E_0, ls='--', color='green', alpha=.7)
+# ax.axvline(QD_GaAs_HAM.omega_T / QD_GaAs_RAMAN.E_0, ls='--', color='orange', alpha=.7)
+ax.axvline(QD_GaAs_HAM.omega_L, ls='--', color='green', alpha=.7)
+ax.axvline(QD_GaAs_HAM.omega_T, ls='--', color='orange', alpha=.7)
 plt.show()
