@@ -12,6 +12,7 @@ from scipy import integrate as integ
 from scipy import linalg as lin
 
 from helper_functions import J, K, basis_pmz, basis_spherical, threej, Y_lm
+from helper_functions import j_sph
 from root_solver_2d import RootSolverComplex2d
 
 __all__ = ['ModelSpaceElectronHolePair', 'RamanQD']
@@ -459,9 +460,9 @@ class RamanQD(RootSolverComplex2d):
 
         def psifn(r):
             if r <= self.r_0:
-                return A / np.sqrt(r) * J(l=l+1/2)(x * r / self.r_0)
+                return A * j_sph(l)(x*r/self.r_0)
             else:
-                return B / np.sqrt(r) * K(l=l+1/2)(y * r / self.r_0)
+                return B * k_sph(l)(y*r/self.r_0)
         return psifn
 
     def _Psi_ang_lm(self, l, m):
