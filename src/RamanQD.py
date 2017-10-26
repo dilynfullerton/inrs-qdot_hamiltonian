@@ -11,8 +11,8 @@ from matplotlib import pyplot as plt
 from scipy import integrate as integ
 from scipy import linalg as lin
 
-from helper_functions import J, K, basis_pmz, basis_spherical, threej, Y_lm
-from helper_functions import j_sph
+from helper_functions import basis_pmz, basis_spherical, threej, Y_lm
+from helper_functions import j_sph, k_sph
 from root_solver_2d import RootSolverComplex2d
 
 __all__ = ['ModelSpaceElectronHolePair', 'RamanQD']
@@ -453,7 +453,7 @@ class RamanQD(RootSolverComplex2d):
     def get_numbers(self, state):
         return state[0]
 
-    def _Psi_rad_lnj(self, l, n, j):
+    def _Psi_rad_unnormalized_lnj(self, l, n, j):
         A, B = self._A_B(l=l, n=n, j=j)
         x = self.x(j=j, l=l, n=n)
         y = self.y(j=j, l=l, n=n)
@@ -463,6 +463,22 @@ class RamanQD(RootSolverComplex2d):
                 return A * j_sph(l)(x*r/self.r_0)
             else:
                 return B * k_sph(l)(y*r/self.r_0)
+        return psifn
+
+    def _Psi_rad_norm_lnj(self, l, n, j):
+        """Return the L2 norm of the radial part of psi
+        """
+        psi = self._Psi_rad_unnormalized_lnj(l=l, n=n, j=j)
+
+        def ifn(r):
+            return abs(psi(r))**2 * r**2
+        return integ.quad(ifn, 0, np.inf)[0]
+
+    def _Psi_rad_lnj(self, l, n, j):
+        def psifn(r):
+            psi = self._Psi_rad_unnormalized_lnj(l=l, n=n, j=j)
+            norm = self._Psi_rad_norm_lnj(l=l, n=n, j=j)
+            return psi(r) / norm
         return psifn
 
     def _Psi_ang_lm(self, l, m):
@@ -560,42 +576,14 @@ class RamanQD(RootSolverComplex2d):
         elif (lb, nb, la, na, j) in self._I_dict:
             return self._I_dict[lb, nb, la, na, j]
 
-        # psi_rb = self._Psi_rad_lnj(l=lb, n=nb, j=j)
-        # psi_ra = self._Psi_rad_lnj(l=la, n=na, j=j)
-        #
-        # def ifn(r):
-        #     return complex(np.conj(psi_ra(r)) * psi_rb(r) * r**2)
-        # ans_re1 = integ.quad(lambda x: ifn(x).real, a=0, b=self.r_0)[0]
-        # ans_im1 = integ.quad(lambda x: ifn(x).imag, a=0, b=self.r_0)[0]
-        # ans_re2 = integ.quad(lambda x: ifn(x).real, a=self.r_0, b=np.inf)[0]
-        # ans_im2 = integ.quad(lambda x: ifn(x).imag, a=self.r_0, b=np.inf)[0]
-        # ans = ans_re1 + ans_re2 + 1j * (ans_im1 + ans_im2)
-        # self._I_dict[lb, nb, la, na, j] = ans
-        # return self.I(lb=lb, nb=nb, la=la, na=na, j=j)
+        def ifn(r):
+            psia = self._Psi_rad_lnj(l=la, n=na, j=j)
+            psib = self._Psi_rad_lnj(l=lb, n=nb, j=j)
+            return complex(np.conj(psia(r)) * psib(r)) * r**2
 
-        r0 = self.r_0
-
-        def ifn_j(r):
-            xa = self.x(l=la, n=na, j=j)
-            xb = self.x(l=lb, n=nb, j=j)
-            return np.conj(J(la+1/2)(z=xa*r/r0)) * J(lb+1/2)(z=xb*r/r0) * r
-
-        def ifn_k(r):
-            ya = self.y(l=la, n=na, j=j)
-            yb = self.y(l=lb, n=nb, j=j)
-            return np.conj(K(la+1/2)(z=ya*r/r0)) * K(lb+1/2)(z=yb*r/r0) * r
-
-        ans_j_re = integ.quad(lambda x: ifn_j(x).real, a=0, b=self.r_0)[0]
-        ans_j_im = integ.quad(lambda x: ifn_j(x).imag, a=0, b=self.r_0)[0]
-        ans_j = ans_j_re + 1j * ans_j_im
-
-        ans_k_re = integ.quad(lambda x: ifn_k(x).real, a=self.r_0, b=np.inf)[0]
-        ans_k_im = integ.quad(lambda x: ifn_k(x).imag, a=self.r_0, b=np.inf)[0]
-        ans_k = ans_k_re + 1j * ans_k_im
-
-        Aa, Ba = self._A_B(l=la, n=na, j=j)
-        Ab, Bb = self._A_B(l=lb, n=nb, j=j)
-        ans = Aa * Ab * ans_j + Ba * Bb * ans_k
+        re = integ.quad(lambda x: ifn(x).real, 0, np.inf)[0]
+        im = integ.quad(lambda x: ifn(x).imag, 0, np.inf)[0]
+        ans = re + 1j * im
         self._I_dict[lb, nb, la, na, j] = ans
         return self.I(lb=lb, nb=nb, la=la, na=na, j=j)
 
@@ -618,59 +606,24 @@ class RamanQD(RootSolverComplex2d):
         elif (lbj, nbj, lcj, ncj, la, na, j) in self._II_dict:
             return self._II_dict[lbj, nbj, lcj, ncj, la, na, j]
 
-        # psi_rb = self._Psi_rad_lnj(l=lbj, n=nbj, j=j)
-        # psi_rc = self._Psi_rad_lnj(l=lcj, n=ncj, j=j)
-        # Phi_ln = self.hamiltonian.Phi_ln(l=la, n=na)
-        #
-        # def ifn(r):
-        #     return complex(np.conj(psi_rb(r)) * Phi_ln(r) * psi_rc(r) * r**2)
-        # result_re1 = integ.quad(lambda x: ifn(x).real, 0, self.r_0)[0]
-        # result_im1 = integ.quad(lambda x: ifn(x).imag, 0, self.r_0)[0]
-        # result_re2 = integ.quad(lambda x: ifn(x).real, self.r_0, np.inf)[0]
-        # result_im2 = integ.quad(lambda x: ifn(x).imag, self.r_0, np.inf)[0]
-        # result = result_re1 + result_re2 + 1j * (result_im1 + result_im2)
-        # self._II_dict[lbj, nbj, lcj, ncj, la, na, j] = result
-        # return self.II(lbj=lbj, nbj=nbj, lcj=lcj, ncj=ncj, la=la, na=na, j=j)
-
-        r0 = self.r_0
         Phi_ln = self.hamiltonian.Phi_ln(l=la, n=na)
+        psib = self._Psi_rad_lnj(l=lbj, n=nbj, j=j)
+        psic = self._Psi_rad_lnj(l=lcj, n=ncj, j=j)
 
-        def ifnj(r):
-            xb = self.x(l=lbj, n=nbj, j=j)
-            xc = self.x(l=lcj, n=ncj, j=j)
-            return (
-                np.conj(J(lbj+1/2)(xb * r / r0)) * Phi_ln(r) *
-                J(lcj+1/2)(xc * r / r0) * r
-            )
-
-        def ifnk(r):
-            yb = self.y(l=lbj, n=nbj, j=j)
-            yc = self.y(l=lcj, n=ncj, j=j)
-            return (
-                np.conj(K(lbj+1/2)(yb * r / r0)) * Phi_ln(r) *
-                K(lcj+1/2)(yc * r / r0) * r
-
-            )
-
-        resultj_re = integ.quad(lambda x: ifnj(x).real, 0, r0)[0]
-        resultj_im = integ.quad(lambda x: ifnj(x).imag, 0, r0)[0]
-        resultj = resultj_re + 1j * resultj_im
-
-        resultk_re = integ.quad(lambda x: ifnk(x).real, r0, np.inf)[0]
-        resultk_im = integ.quad(lambda x: ifnk(x).imag, r0, np.inf)[0]
-        resultk = resultk_re + 1j * resultk_im
-
-        Ab, Bb = self._A_B(l=lbj, n=nbj, j=j)
-        Ac, Bc = self._A_B(l=lcj, n=ncj, j=j)
-        result = Ab * Ac * resultj + Bb * Bc * resultk
-        self._II_dict[lbj, nbj, lcj, ncj, la, na, j] = result
+        def ifn(r):
+            return complex(np.conj(psib(r)) * Phi_ln(r) * psic(r)) * r**2
+        re = integ.quad(lambda x: ifn(x).real, 0, np.inf)[0]
+        im = integ.quad(lambda x: ifn(x).imag, 0, np.inf)[0]
+        ans = re + 1j * im
+        self._II_dict[lbj, nbj, lcj, ncj, la, na, j] = ans
         return self.II(lbj=lbj, nbj=nbj, lcj=lcj, ncj=ncj, la=la, na=na, j=j)
 
     def _A_B(self, l, n, j):
-        Jln = J(l=l+1/2)(self.x(l=l, n=n, j=j))
-        Kln = K(l=l+1/2)(self.y(l=l, n=n, j=j))
-        denom = np.sqrt(Kln**2 * abs(Jln)**2 + Jln**2 * abs(Kln)**2)
-        return Kln / denom, Jln / denom
+        """I have redefined these to be unnormalized coefficients
+        """
+        jln = j_sph(l=l)(self.x(l=l, n=n, j=j))
+        kln = k_sph(l=l)(self.y(l=l, n=n, j=j))
+        return kln, jln
 
     # -- Obtaining roots --
     def x(self, j, l=None, n=None, state=None):
@@ -762,56 +715,21 @@ class RamanQD(RootSolverComplex2d):
             yield np.array([x0, y0])
 
     def _get_root_func1(self, l, j, *args, **kwargs):
-        l = l+1/2
-        mu0 = self.mu_0j(j)
-        mui = self.mu_ij(j)
-
-        def rf1(x, y, partial_x=0, partial_y=0):
-            J_x = J(l)(x)
-            dJ_x = J(l, d=1)(x)
-            K_y = K(l)(y)
-            dK_y = K(l, d=1)(y)
-            if partial_x == 0 and partial_y == 0:
-                return (
-                    mu0 * x * dJ_x * K_y - mui * y * J_x * dK_y
-                )
-            elif (partial_x, partial_y) == (1, 0):
-                d2J_x = J(l, d=2)(x)
-                return (
-                    mu0 * (dJ_x + x * d2J_x) * K_y - mui * y * dJ_x + dK_y
-                )
-            elif (partial_x, partial_y) == (0, 1):
-                d2K_y = K(l, d=2)(y)
-                return (
-                    mu0 * x * dJ_x * dK_y - mui * (dK_y + y * d2K_y) * J_x
-                )
-            else:
-                raise RuntimeError  # TODO
+        """Re-expressed this in terms of spherical Bessel functions
+        """
+        def rf1(x, y):
+            jx = j_sph(l)(x)
+            ky = k_sph(l)(y)
+            djx = j_sph(l, d=1)(x)
+            dky = k_sph(l, d=1)(y)
+            return self.mu_0j(j) * x * djx * ky - self.mu_ij(j) * y * dky * jx
         return rf1
 
     def _get_root_func2(self, j, *args, **kwargs):
-        mu0 = self.mu_0j(j)
-        mui = self.mu_ij(j)
-        vj = self.V_j(j)
-
-        def _fx2(x, deriv=0):
-            if deriv == 0:
-                return x**2
-            elif deriv == 1:
-                return 2*x
-            elif deriv == 2:
-                return 2
-            elif deriv > 2:
-                return 0
-
-        def rf2(x, y, partial_x=0, partial_y=0):
-            if partial_x == 0 and partial_y == 0:
-                tc = 2 * mu0 * self.r_0**2 * vj
-            else:
-                tc = 0
-            # TODO: verify formula
-            return (
-                _fx2(y, deriv=partial_y) +
-                mu0 / mui * _fx2(x, deriv=partial_x) - tc)
-
+        def rf2(x, y):
+            mu0 = self.mu_0j(j)
+            mui = self.mu_ij(j)
+            vj = self.V_j(j)
+            r0 = self.r_0
+            return mui * y**2 + mu0 * x**2 - 2 * mu0 * mui * r0 * vj
         return rf2
