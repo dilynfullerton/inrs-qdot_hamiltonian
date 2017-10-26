@@ -751,8 +751,8 @@ class RamanQD(RootSolverComplex2d):
                 x, y = root
                 assert not np.isnan(x)  # TODO
                 assert not np.isnan(y)  # TODO
-                self._x[l, n, j] = x
-                self._y[l, n, j] = y
+                self._x[l, n, j] = x.real + 0j
+                self._y[l, n, j] = y.imag * 1j
 
     def _get_expected_roots_xy(self, l, j, *args, **kwargs):
         for x0 in self._expected_roots_x[l, j]:
