@@ -23,7 +23,13 @@ def K(l, d=0):
     return fn_k
 
 
-def _spherical_bessel1(l, func, z, dz=0):
+def _spherical_bessel1(l, func, z, dz=0, type=0):
+    """Compute the spherical bessel given by func_l at z, where dz specifies
+    the number of derivatives.
+    :param type: integer specifying the type of bessel function
+      0 = The derivative formulas are valid for functions j, y, h1, and h2
+      1 = The derivative formulas are valid for functions k
+    """
     z = complex(z)
     if dz == 0:
         return func(n=l, z=z)
@@ -35,22 +41,34 @@ def _spherical_bessel1(l, func, z, dz=0):
         rest = 0
         for m in range(k+1):
             rest += (
-                (-1)**m * sp.factorial(m) * z**(-m-1) * sp.binom(k, m) *
+                (-1)**(m % 2) * sp.factorial(m) * z**(-m-1) * sp.binom(k, m) *
                 _spherical_bessel1(l=l, func=func, z=z, dz=k-m)
             )
-        return jk - (l + 1) * rest
+        if type == 0:
+            return jk - (l + 1) * rest
+        else:
+            return -jk - (l + 1) * rest
 
 
 def j_sph(l, d=0):
     def jz(z):
-        return _spherical_bessel1(l=l, func=sp.spherical_jn, z=z, dz=d)
+        return _spherical_bessel1(l=l, func=sp.spherical_jn, z=z, dz=d,
+                                  type=0)
     return jz
 
 
 def i_sph(l, d=0):
     def iz(z):
-        return _spherical_bessel1(l=l, func=sp.spherical_in, z=z, dz=d)
+        return _spherical_bessel1(l=l, func=sp.spherical_in, z=z, dz=d,
+                                  type=0)
     return iz
+
+
+def k_sph(l, d=0):
+    def kz(z):
+        return _spherical_bessel1(l=l, func=sp.spherical_kn, z=z, dz=d,
+                                  type=1)
+    return kz
 
 
 def g_sph(l, d=0):
