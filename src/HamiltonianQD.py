@@ -265,13 +265,14 @@ class HamiltonianQD(RootSolverComplex2d):
         return np.sqrt(self._nu2(mu2=mu**2))
 
     def plot_root_function_mu(self, l, xdat, show=True):
-        mudat = xdat + self.low_mu
+        mudat_p = xdat + self.low_mu
+        mudat_m = -xdat - self.low_mu
         fn = self._get_root_function(l=l)
 
         def rootfn(xy):
             mu, nu = xy
-            fr, fi, gr, gi = fn(np.array([mu.real, mu.imag, nu.real, nu.imag]))
-            return np.array([fr + 1j * fi, gr + 1j * gi])
+            f, g = fn(np.array([mu, nu]))
+            return np.array([f, g])
 
         def fpr(mu):
             nu = self._nu(mu=mu)
@@ -279,13 +280,23 @@ class HamiltonianQD(RootSolverComplex2d):
 
         fig, ax = plt.subplots(1, 1)
         ax.axhline(0, color='gray', lw=1, alpha=.5)
+        ax.axvline(0, ls='-', color='black', lw=1, alpha=.5)
 
         for n in range(self.num_n):
             mu = self.mu_nl(l=l, n=n)
             if mu is None:
                 continue  # TODO
-            ax.axvline(mu.real-self.low_mu, ls='--', color='green',
-                       lw=1, alpha=.5)
+            mur = mu.real
+            if mur < 0:
+                pltzero = mu.real + self.low_mu
+            else:
+                pltzero = mu.real - self.low_mu
+            ax.axvline(pltzero, ls='--', color='green', lw=1, alpha=.5)
+
+        xdat = np.concatenate((-xdat, xdat))
+        xdat.sort()
+        mudat = np.concatenate((mudat_m, mudat_p))
+        mudat.sort()
 
         ydat = np.array([fpr(x) for x in mudat])
         ydat /= lin.norm(ydat, ord=2)
