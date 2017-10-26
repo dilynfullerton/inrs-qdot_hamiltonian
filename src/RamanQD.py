@@ -49,10 +49,11 @@ def Pi(j, p, laj, maj):
 
 class ModelSpaceElectronHolePair:
     def __init__(self, num_n):
-        self.dim_n = num_n
+        self.n_max = num_n - 1
+        self.dim_n = 2 * self.n_max + 1
 
     def iter_states_SP(self, num_l):
-        for l, n in it.product(range(num_l), range(self.dim_n)):
+        for l, n in it.product(range(num_l), range(-self.n_max, self.n_max+1)):
             for m in range(-l, l+1):
                 yield (l, m, n), self.make_state_SP(l=l, m=m, n=n)
 
@@ -61,7 +62,8 @@ class ModelSpaceElectronHolePair:
             num_l2 = num_l
         for l1, l2 in it.product(range(num_l), range(num_l2)):
             for m1, m2 in it.product(range(-l1, l1+1), range(-l2, l2+1)):
-                for n1, n2 in it.product(self.dim_n, repeat=2):
+                for n1, n2 in it.product(range(-self.n_max, self.n_max),
+                                         repeat=2):
                     yield (
                         (l1, m1, n1, l2, m2, n2),
                         self.make_state_EHP(l1, m1, n1, l2, m2, n2)
@@ -71,7 +73,7 @@ class ModelSpaceElectronHolePair:
         """Make single-particle state
         """
         return qt.tensor(
-            qt.fock_dm(self.dim_n, n),
+            qt.fock_dm(self.dim_n, n % self.dim_n),
             qt.spin_state(j=l, m=m, type='dm')
         )
 
@@ -156,7 +158,9 @@ class RamanQD(RootSolverComplex2d):
         """
         # Model constants
         self.num_n = num_n
+        self.n_max = num_n - 1
         self.num_l = num_l
+        self.l_max = num_l - 1
         self.hamiltonian = hamiltonian
         self.ms = ModelSpaceElectronHolePair(num_n=self.num_n)
         if self.num_n is None:
@@ -452,6 +456,12 @@ class RamanQD(RootSolverComplex2d):
     def get_numbers(self, state):
         return state[0]
 
+    def iter_x_n(self, l, j):
+        for n in range(-self.n_max, self.n_max + 1):
+            x = self.x(j=j, l=l, n=n)
+            if x is not None:
+                yield x, n
+
     def _Psi_rad_unnormalized_lnj(self, l, n, j):
         A, B = self._A_B(l=l, n=n, j=j)
         x = self.x(j=j, l=l, n=n)
@@ -631,24 +641,28 @@ class RamanQD(RootSolverComplex2d):
 
     # -- Obtaining roots --
     def x(self, j, l=None, n=None, state=None):
-        if l is not None and n is not None and (l, n, j) in self._x:
+        if n is not None and (l, n, j) in self._x:
             return self._x[l, n, j]
+        elif n is not None and (l, -n, j) is self._x:
+            return -self._x[l, -n, j]  # TODO: verify anti-symmetry of x_n
         elif state is not None:
             l, m, n = self.get_numbers(state=state)
             return self.x(j=j, l=l, n=n)
         elif n == 0 and l >= self.num_l:
             return 0+0j
         else:
-            return None
+            return None  # TODO
 
     def y(self, l, n, j):
         if (l, n, j) in self._y:
             return self._y[l, n, j]
+        elif (l, -n, j) in self._y:
+            return self._y[l, -n, j]  # TODO: verify symmetry of y_n
         elif n == 0 and l >= self.num_l:
             print('YOU SHOULD NOT BE HERE!')
             return self._get_y(x=0+0j, j=j)  # TODO
         else:
-            return None
+            return None  # TODO
 
     def _get_y(self, x, j):
         return np.sqrt(
@@ -673,12 +687,9 @@ class RamanQD(RootSolverComplex2d):
         ax.axhline(0, color='gray', lw=1, alpha=.5)
         ax.axvline(0, color='gray', lw=1, alpha=.5)
 
-        for n in range(self.num_n):
-            x = self.x(j=j, l=l, n=n)
-            if x is not None:
-                ax.axvline(x.real, ls='--', color='green', lw=1, alpha=.5)
-            else:
-                print('crap')
+        for x, n in self.iter_x_n(l=l, j=j):
+            print('hello')
+            ax.axvline(x.real, ls='--', color='green', lw=1, alpha=.5)
 
         ydat = np.array([fpr(x) for x in xdat])
         # ydat /= lin.norm(ydat, ord=2)
@@ -700,8 +711,7 @@ class RamanQD(RootSolverComplex2d):
 
     def _fill_roots_xy(self):
         for j, l in it.product([1, 2], range(self.num_l)):
-            for root, n in zip(self._solve_roots_xy(j=j, l=l),
-                               range(self.num_n)):
+            for root, n in self._solve_roots_xy(j=j, l=l):
                 x, y = root
                 assert not np.isnan(x)  # TODO
                 assert not np.isnan(y)  # TODO
@@ -709,10 +719,11 @@ class RamanQD(RootSolverComplex2d):
                 self._y[l, n, j] = y
 
     def _get_expected_roots_xy(self, j, l, *args, **kwargs):
-        for x0 in self._expected_roots_x[l, j]:
+        start, roots_x = self._expected_roots_x[l, j]
+        for x0, n in zip(roots_x, range(start, self.num_n)):
             x0 = complex(x0)
             y0 = self._get_y(x=x0, j=j)
-            yield np.array([x0, y0])
+            yield np.array([x0, y0], dtype=complex), n
 
     def _get_root_func1(self, j, l, *args, **kwargs):
         """Re-expressed this in terms of spherical Bessel functions

@@ -5,19 +5,20 @@ from scipy import optimize as opt
 class RootSolverComplex2d:
     def _solve_roots_xy(self, *args, **kwargs):
         fun = self._get_root_function_cplx(*args, **kwargs)
-        for x0y0 in self._get_expected_roots_xxyy(*args, **kwargs):
+        for x0y0, n in self._get_expected_roots_xxyy(*args, **kwargs):
             result = opt.root(fun=fun, x0=x0y0)
             if not result.success:
                 print('FAILED')  # TODO
             else:
                 xr, xi, yr, yi = result.x
-                yield np.array([xr + 1j * xi, yr + 1j * yi])
+                yield np.array([xr + 1j * xi, yr + 1j * yi]), n
 
     def _get_expected_roots_xxyy(self, *args, **kwargs):
-        for x0, y0 in self._get_expected_roots_xy(*args, **kwargs):
+        for x0y0, n in self._get_expected_roots_xy(*args, **kwargs):
+            x0, y0 = x0y0
             x0 = complex(x0)
             y0 = complex(y0)
-            yield np.array([x0.real, x0.imag, y0.real, y0.imag])
+            yield np.array([x0.real, x0.imag, y0.real, y0.imag]), n
 
     def _get_expected_roots_xy(self, *args, **kwargs):
         raise NotImplementedError
@@ -59,17 +60,17 @@ class RootSolverComplex2d:
 class RootSolverReal2d:
     def _solve_roots_xy(self, *args, **kwargs):
         fun = self._get_root_function(*args, **kwargs)
-        for x0y0 in self._get_expected_roots_xxyy(*args, **kwargs):
+        for x0y0, n in self._get_expected_roots_xxyy(*args, **kwargs):
             result = opt.root(fun=fun, x0=x0y0)
             if not result.success:
                 print('FAILED')  # TODO
             else:
                 x, y = result.x
-                yield np.array([x, y])
+                yield np.array([x, y]), n
 
     def _get_expected_roots_xxyy(self, *args, **kwargs):
-        for x0, y0 in self._get_expected_roots_xy(*args, **kwargs):
-            yield np.array([x0, y0])
+        for x0y0, n in self._get_expected_roots_xy(*args, **kwargs):
+            yield np.array(x0y0), n
 
     def _get_expected_roots_xy(self, *args, **kwargs):
         raise NotImplementedError

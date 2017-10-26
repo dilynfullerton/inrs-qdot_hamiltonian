@@ -139,7 +139,7 @@ class HamiltonianQD(RootSolverComplex2d):
                     yield l, m, n
 
     def iter_mu_n(self, l):
-        for n in range(self.num_n):
+        for n in range(-self.n_max, self.n_max+1):
             mu = self.mu_nl(n=n, l=l)
             if mu is not None:
                 yield mu, n
@@ -245,24 +245,24 @@ class HamiltonianQD(RootSolverComplex2d):
 
     # -- Root finding --
     def nu_nl(self, n, l):
-        if (l, n) in self._roots_nu:
+        if n < 0:
+            return self.nu_nl(n=-n, l=l)  # TODO: Is this right?
+        elif (l, n) in self._roots_nu:
             return self._roots_nu[l, n]
         else:
-            raise RuntimeError  # TODO
+            return None  # TODO
 
     def mu_nl(self, n, l):
-        if (l, n) in self._roots_mu:
+        if n < 0:
+            return -self.mu_nl(n=-n, l=l)  # TODO: Is this right?
+        elif (l, n) in self._roots_mu:
             return self._roots_mu[l, n]
         else:
             return None  # TODO
 
-    def _nu2(self, mu2):
-        mu2 = complex(mu2)
-        return self._beta_div2 * mu2 - self.r_0**2 * self.gamma
-
     def _nu(self, mu):
         mu = complex(mu)
-        return np.sqrt(self._nu2(mu2=mu**2))
+        return np.sqrt(self._beta_div2 * mu**2 - self.r_0**2 * self.gamma)
 
     def plot_root_function_mu(self, l, xdat, show=True):
         mudat_p = xdat + self.low_mu
@@ -282,12 +282,8 @@ class HamiltonianQD(RootSolverComplex2d):
         ax.axhline(0, color='gray', lw=1, alpha=.5)
         ax.axvline(0, ls='-', color='black', lw=1, alpha=.5)
 
-        for n in range(self.num_n):
-            mu = self.mu_nl(l=l, n=n)
-            if mu is None:
-                continue  # TODO
-            mur = mu.real
-            if mur < 0:
+        for mu, n in self.iter_mu_n(l=l):
+            if n < 0:
                 pltzero = mu.real + self.low_mu
             else:
                 pltzero = mu.real - self.low_mu
@@ -306,7 +302,7 @@ class HamiltonianQD(RootSolverComplex2d):
         # ylog /= lin.norm(ylog, ord=2)
         # ax.plot(xdat, ylog, '--', color='red')
 
-        ypr = np.real(np.sqrt([self._nu2(mu2=x**2) for x in mudat]))
+        ypr = np.real([self._nu(x) for x in mudat])
         ypr /= lin.norm(ypr, ord=2)
         ax.plot(xdat, ypr, '-', color='blue')
         ax.plot(xdat, -ypr, '-', color='blue')
@@ -317,7 +313,7 @@ class HamiltonianQD(RootSolverComplex2d):
 
     def _fill_roots_mu_nu(self):
         for l in range(self.num_l):
-            for root, n in zip(self._solve_roots_xy(l=l), range(self.num_n)):
+            for root, n in self._solve_roots_xy(l=l):
                 mu, nu = root
                 assert not np.isnan(mu)  # TODO
                 assert not np.isnan(nu)  # TODO
@@ -325,10 +321,11 @@ class HamiltonianQD(RootSolverComplex2d):
                 self._roots_nu[l, n] = nu
 
     def _get_expected_roots_xy(self, l, *args, **kwargs):
-        for mu0 in self._expected_roots_mu[l]:
+        start, mu_roots = self._expected_roots_mu[l]
+        for mu0, n in zip(mu_roots, range(start, self.num_n)):
             mu0 = complex(mu0+self.low_mu)
-            nu0 = np.sqrt(self._nu2(mu2=mu0**2))
-            yield np.array([mu0, nu0])
+            nu0 = self._nu(mu=mu0)
+            yield np.array([mu0, nu0], dtype=complex), n
 
     def _get_root_func1(self, l, *args, **kwargs):
         def rf1(mu, nu):
