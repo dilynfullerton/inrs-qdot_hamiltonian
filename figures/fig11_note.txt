@@ -1,0 +1,4 @@
+I made some changes, including implementing the wavefunction in terms of 
+spherical Bessel functions and computing matrix elements using the 
+wavefunctions instead of doing this separately using J and K functions.
+This seems to have changed the resultant plots significantly.

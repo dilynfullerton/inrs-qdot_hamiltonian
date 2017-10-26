@@ -53,19 +53,19 @@ for l in range(QD_GaAs_HAM.num_l):
         ydats_Phi_n1[l][i] = QD_GaAs_HAM.Phi_ln(l=l, n=1)(r)
         ydats_Phi_n2[l][i] = QD_GaAs_HAM.Phi_ln(l=l, n=2)(r)
         ydats_Phi_n3[l][i] = QD_GaAs_HAM.Phi_ln(l=l, n=3)(r)
-fig, axes = plt.subplots(4, 1, sharex=True)
-for l in range(QD_GaAs_HAM.num_l):
-    axes[0].plot(XDAT_R, ydats_Phi_n0[l], label='l={}'.format(l))
-    axes[1].plot(XDAT_R, ydats_Phi_n1[l], label='l={}'.format(l))
-    axes[2].plot(XDAT_R, ydats_Phi_n2[l], label='l={}'.format(l))
-    axes[3].plot(XDAT_R, ydats_Phi_n3[l], label='l={}'.format(l))
-axes[0].set_title('Phi(r)')
-axes[0].legend()
-axes[0].set_ylabel('n=0')
-axes[1].set_ylabel('n=1')
-axes[2].set_ylabel('n=2')
-axes[3].set_ylabel('n=3')
-plt.show()
+# fig, axes = plt.subplots(4, 1, sharex=True)
+# for l in range(QD_GaAs_HAM.num_l):
+#     axes[0].plot(XDAT_R, ydats_Phi_n0[l], label='l={}'.format(l))
+#     axes[1].plot(XDAT_R, ydats_Phi_n1[l], label='l={}'.format(l))
+#     axes[2].plot(XDAT_R, ydats_Phi_n2[l], label='l={}'.format(l))
+#     axes[3].plot(XDAT_R, ydats_Phi_n3[l], label='l={}'.format(l))
+# axes[0].set_title('Phi(r)')
+# axes[0].legend()
+# axes[0].set_ylabel('n=0')
+# axes[1].set_ylabel('n=1')
+# axes[2].set_ylabel('n=2')
+# axes[3].set_ylabel('n=3')
+# plt.show()
 
 # assert False
 
@@ -86,12 +86,8 @@ QD_GaAs_RAMAN = RamanQD(
     Gamma_b_v=GAMMA_A1,
     Gamma_b_c=GAMMA_A1,
     expected_roots_x_lj={
-        # (0, 1): [.001, 2.79, 5.36],
-        # (0, 2): [.001, 3.00, 5.94, 8.34],
-        # (1, 1): [.001, 3.96],
-        # (1, 2): [.001, 4.29, 7.27],
-        (0, 1): [-5.36, -2.76, .001, 2.79, 5.36],
-        (0, 2): [-8.34, -5.94, -3.00, .001, 3.00, 5.94, 8.34],
+        (0, 1): [-5.39, -2.80, 2.80, 5.39],
+        (0, 2): [-8.34, -5.94, -3.00, 3.00, 5.94, 8.34],
         (1, 1): [-3.96, .001, 3.96],
         (1, 2): [-7.27, -4.29, .001, 4.29, 7.27],
         (2, 1): [.001],
@@ -113,12 +109,6 @@ QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=1, xdat=XDAT_X, show=True)
 QD_GaAs_RAMAN.plot_root_fn_x(l=0, j=2, xdat=XDAT_X, show=True)
 QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=1, xdat=XDAT_X, show=True)
 QD_GaAs_RAMAN.plot_root_fn_x(l=1, j=2, xdat=XDAT_X, show=True)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=2, j=1, xdat=XDAT_X, show=True)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=2, j=2, xdat=XDAT_X, show=True)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=3, j=1, xdat=XDAT_X, show=True)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=3, j=2, xdat=XDAT_X, show=True)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=4, j=1, xdat=XDAT_X, show=True)
-# QD_GaAs_RAMAN.plot_root_fn_x(l=4, j=2, xdat=XDAT_X, show=True)
 
 # assert False
 
@@ -129,7 +119,7 @@ e_l = np.array([1, 0, 0])  # incident polarization
 omega_l = .03782
 e_s = np.array([0, 0, 1])  # secondary polarization
 
-xdat = np.linspace(1e-4, 1, 101)
+xdat = np.linspace(1e-4, 2, 101)
 ydatr = np.empty_like(xdat)
 ydati = np.empty_like(xdat)
 for x, i in zip(xdat, it.count()):
@@ -140,7 +130,7 @@ for x, i in zip(xdat, it.count()):
         omega_l=omega_l, e_l=e_l, omega_s=omega_s,
         # e_s=e_s,
         e_s=None,
-        phonon_assist=True,
+        phonon_assist=False,
     )
     ydatr[i] = cross_sec.real
     ydati[i] = cross_sec.imag
