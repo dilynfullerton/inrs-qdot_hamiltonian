@@ -3,17 +3,15 @@ Definitions for creating a Raman spectra for a quantum dot according to
 the definitions in Riera
 """
 import itertools as it
-from collections import namedtuple
 
 import numpy as np
 import qutip as qt
 from matplotlib import pyplot as plt
 from scipy import integrate as integ
-from scipy import linalg as lin
 
 from helper_functions import basis_pmz, basis_spherical, threej, Y_lm
 from helper_functions import j_sph, k_sph
-from root_solver_2d import RootSolverComplex2d
+from root_solver_2d import RootSolverComplex2d, RootSolverReal2d
 
 __all__ = ['ModelSpaceElectronHolePair', 'RamanQD']
 
@@ -198,6 +196,7 @@ class RamanQD(RootSolverComplex2d):
         self._intS = dict()
         self._I_dict = dict()
         self._II_dict = dict()
+        self._psi_rad_norm_dict = dict()  # l, n, j -> psi_rad_norm
 
         # Other
         self.verbose = verbose
@@ -468,11 +467,16 @@ class RamanQD(RootSolverComplex2d):
     def _Psi_rad_norm_lnj(self, l, n, j):
         """Return the L2 norm of the radial part of psi
         """
+        if (l, n, j) in self._psi_rad_norm_dict:
+            return self._psi_rad_norm_dict[l, n, j]
+
         psi = self._Psi_rad_unnormalized_lnj(l=l, n=n, j=j)
 
-        def ifn(r):
+        def intfn(r):
             return abs(psi(r))**2 * r**2
-        return integ.quad(ifn, 0, np.inf)[0]
+        self._psi_rad_norm_dict[l, n, j] = np.sqrt(
+            integ.quad(intfn, 0, np.inf)[0])
+        return self._Psi_rad_norm_lnj(l=l, n=n, j=j)
 
     def _Psi_rad_lnj(self, l, n, j):
         def psifn(r):
@@ -641,33 +645,29 @@ class RamanQD(RootSolverComplex2d):
         if (l, n, j) in self._y:
             return self._y[l, n, j]
         elif n == 0 and l >= self.num_l:
-            return np.sqrt(self._y2(x2=0+0j, j=j))
+            print('YOU SHOULD NOT BE HERE!')
+            return self._get_y(x=0+0j, j=j)  # TODO
         else:
             return None
 
-    def _y2(self, x2, j):
-        return (
+    def _get_y(self, x, j):
+        return np.sqrt(
             2 * self.mu_0j(j) * self.r_0**2 * self.V_j(j) -
-            self.mu_0j(j) / self.mu_ij(j) * x2
+            self.mu_0j(j) / self.mu_ij(j) * x**2
         )
 
     def plot_root_fn_x(self, l, j, xdat, show=True):
         fn = self._get_root_function(l=l, j=j)
 
-        def rootfn(xy):
-            x, y = xy
-            fr, fi, gr, gi = fn(np.array([x.real, x.imag, y.real, y.imag]))
-            return np.array([fr + 1j * fi, gr + 1j * gi])
-
         def fpr(x):
             x = complex(x)
-            y = np.sqrt(self._y2(x2=x**2, j=j))
-            result = rootfn(np.array([x, y]))[0]
-            # return np.real(result)
-            if np.real(x) < 0:
-                return np.imag(result)
-            else:
-                return np.real(result)
+            y = self._get_y(x=x, j=j)
+            result = fn(np.array([x, y]))[0]
+            return np.real(result)
+            # if x.real < 0:
+            #     return np.imag(result)
+            # else:
+            #     return np.real(result)
 
         fig, ax = plt.subplots(1, 1)
         ax.axhline(0, color='gray', lw=1, alpha=.5)
@@ -688,7 +688,7 @@ class RamanQD(RootSolverComplex2d):
         # ylog /= lin.norm(ylog, ord=2)
         ax.plot(xdat, ylog, '--', color='red')
 
-        ypr = np.real(np.sqrt([self._y2(x2=x**2, j=j) for x in xdat]))
+        ypr = np.real(np.sqrt([self._get_y(x=x, j=j) for x in xdat]))
         # ypr /= lin.norm(ypr, ord=2)
         ax.plot(xdat, ypr, '-', color='blue')
         ax.plot(xdat, -ypr, '-', color='blue')
@@ -700,29 +700,36 @@ class RamanQD(RootSolverComplex2d):
 
     def _fill_roots_xy(self):
         for j, l in it.product([1, 2], range(self.num_l)):
-            for root, n in zip(self._solve_roots_xy(l=l, j=j),
+            for root, n in zip(self._solve_roots_xy(j=j, l=l),
                                range(self.num_n)):
                 x, y = root
                 assert not np.isnan(x)  # TODO
                 assert not np.isnan(y)  # TODO
-                self._x[l, n, j] = x.real + 0j
-                self._y[l, n, j] = y.real + 0j
+                self._x[l, n, j] = x
+                self._y[l, n, j] = y
 
-    def _get_expected_roots_xy(self, l, j, *args, **kwargs):
+    def _get_expected_roots_xy(self, j, l, *args, **kwargs):
         for x0 in self._expected_roots_x[l, j]:
             x0 = complex(x0)
-            y0 = np.sqrt(self._y2(x2=x0**2, j=j))
+            y0 = self._get_y(x=x0, j=j)
             yield np.array([x0, y0])
 
-    def _get_root_func1(self, l, j, *args, **kwargs):
+    def _get_root_func1(self, j, l, *args, **kwargs):
         """Re-expressed this in terms of spherical Bessel functions
         """
         def rf1(x, y):
+            # jx = J(l+1/2)(x)
+            # ky = K(l+1/2)(y)
+            # djx = J(l+1/2, d=1)(x)
+            # dky = K(l+1/2, d=1)(y)
             jx = j_sph(l)(x)
             ky = k_sph(l)(y)
             djx = j_sph(l, d=1)(x)
             dky = k_sph(l, d=1)(y)
-            return self.mu_0j(j) * x * djx * ky - self.mu_ij(j) * y * dky * jx
+            ans = self.mu_0j(j) * x * djx * ky - self.mu_ij(j) * y * dky * jx
+            # print('x={}, y={}'.format(x, y))
+            # print('1: {}'.format(ans))
+            return ans
         return rf1
 
     def _get_root_func2(self, j, *args, **kwargs):
@@ -731,5 +738,8 @@ class RamanQD(RootSolverComplex2d):
             mui = self.mu_ij(j)
             vj = self.V_j(j)
             r0 = self.r_0
-            return mui * y**2 + mu0 * x**2 - 2 * mu0 * mui * r0 * vj
+            ans = mui * y**2 + mu0 * x**2 - 2 * mu0 * mui * r0**2 * vj
+            # print('x={}, y={}'.format(x, y))
+            # print('2: {}'.format(ans))
+            return ans
         return rf2
