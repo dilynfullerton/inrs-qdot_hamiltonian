@@ -519,50 +519,6 @@ class RamanQD(RootSolverComplex2d):
         g2 = self.g2(x1=xa1, x2=xa2, omega_l=omega_l, omega_s=omega_s)
         return g2 - omega_q / self.E_0
 
-    # def p_cv0(self):
-    #     """Momentum between valence and conduction bands, at k=0.
-    #      See Riera (78).
-    #     """
-    #     if self._p_cv0 is not None:
-    #         return self._p_cv0
-    #
-    #     # The unit cell is defined by 3 vectors: a1, a2, a3, which
-    #     # are the columns of...
-    #     a_matrix = self._a_matrix
-    #
-    #     # The function to integrate (in terms of the unit cell basis) is
-    #     def intfn(c1, c2, c3, i):
-    #         # Get position in cartesian basis
-    #         x = np.dot(a_matrix, np.array([c1, c2, c3]))
-    #         r = lin.norm(x, ord=2)
-    #         # Evaluate u1 and u2 at r
-    #         # TODO In Riera, this is written conj(u1'), but I don't know
-    #         # what the prime is for
-    #         u1_conj = np.conj(self.u_j(j=1)(r=r))
-    #         du2 = self.u_j(j=2)(r=r, d_r=1)
-    #         pu2 = x / r * du2
-    #         return (u1_conj * pu2)[i]
-    #
-    #     # Integrate real and imaginary parts separately
-    #     def ifnr(c1, c2, c3, xi):
-    #         return np.real(intfn(c1, c2, c3, i=xi))
-    #
-    #     def ifni(c1, c2, c3, xi):
-    #         return np.imag(intfn(c1, c2, c3, i=xi))
-    #
-    #     # The integral is performed over the unit cell volume, 0 to 1 in
-    #     # each coordinate
-    #     x_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=(0,))[0]
-    #     x_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=(0,))[0]
-    #     y_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=(1,))[0]
-    #     y_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=(1,))[0]
-    #     z_re = integ.nquad(func=ifnr, ranges=[(0, 1)]*3, args=(2,))[0]
-    #     z_im = integ.nquad(func=ifni, ranges=[(0, 1)]*3, args=(2,))[0]
-    #     re = np.array([x_re, y_re, z_re])
-    #     im = np.array([x_im, y_im, z_im])
-    #     self._p_cv0 = re + 1j * im
-    #     return self.p_cv0()
-
     def u_j(self, j):
         """Bloch function. I have not found the definition for this in
         Riera
@@ -570,17 +526,6 @@ class RamanQD(RootSolverComplex2d):
         def ujfn(r, d_r=0):
             return 1  # TODO
         return ujfn
-
-    # def sigma_0(self, omega_s, omega_l, e_l):
-    #     """See Riera (104)
-    #     """
-    #     return (
-    #         (4*np.sqrt(2) * self.V * self.e**4 *
-    #          abs(np.dot(e_l, self.p_cv0()).sum())**2 * self.eta(omega_s) *
-    #          self.mu_r**(1/2) * self.E_0**(3/2)) /
-    #         (9 * np.pi ** 2 * self.m_e ** 2 * self.eta(omega_l) *
-    #          omega_l * omega_s)
-    #     )
 
     def Gamma_aj(self, j):
         return self._Gamma_aj[j-1]
