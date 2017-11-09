@@ -11,49 +11,47 @@ from ModelSpace import ModelSpace
 
 class PhononModelSpace(ModelSpace, RootSolverComplex2d):
     def __init__(
-            self, nmax, lmax, r_0, omega_L, omega_T, num_n, num_l,
-            epsilon_inf_qdot, epsilon_inf_env, beta_T, beta_L,
-            expected_roots_mu_l, electron_charge=1,
+            self, nmax, lmax, radius, omega_L, omega_T, beta_T, beta_L,
+            epsilon_inf_qdot, epsilon_inf_env, expected_roots_mu_l,
             large_R_approximation=False
     ):
         # Model constants
         self.nmax = nmax
         self.lmax = lmax
-        self.num_n = num_n
-        self.num_l = num_l
+        self.num_n = self.nmax + 1
+        self.num_l = self.lmax + 1
 
         # Physical constants
-        self.r_0 = r_0
-        self.eps_a_inf = epsilon_inf_qdot
-        self.eps_b_inf = epsilon_inf_env
+        self.R = radius
+        self.eps_inf_in = epsilon_inf_qdot
+        self.eps_inf_out = epsilon_inf_env
         self.beta_L2 = beta_L**2
         self.beta_T2 = beta_T**2
         self.omega_L = omega_L
         self.omega_T = omega_T
 
         # Derived physical constants
-        self.V = 4/3 * pi * self.r_0**3
-        self._eps_div = self.eps_b_inf / self.eps_a_inf
+        self.volume = 4 / 3 * pi * self.R ** 3
+        self._eps_div = self.eps_inf_out / self.eps_inf_in
         self._beta_div2 = self.beta_L2 / self.beta_T2
         self.omega_L2 = self.omega_L**2
         self.omega_T2 = self.omega_T**2
-        self.eps_a_0 = self.eps_a_inf * self.omega_L2 / self.omega_T2
+        self.eps0_in = self.eps_inf_in * self.omega_L2 / self.omega_T2
         self.omega_F2 = (
-            self.omega_T2 * (self.eps_a_0 + 2 * self.eps_b_inf) /
-            (self.eps_a_inf + 2 * self.eps_b_inf)
+            self.omega_T2 * (self.eps0_in + 2 * self.eps_inf_out) /
+            (self.eps_inf_in + 2 * self.eps_inf_out)
         )
         self.omega_F = np.sqrt(self.omega_F2)
-        self.electron_charge = abs(electron_charge)
         # NOTE: The following definition for gamma is different from gamma_0
         # of Riera
         self.gamma = (self.omega_L2 - self.omega_T2) / self.beta_T2
-        self.C_F = -self.electron_charge * np.sqrt(  # Riera (45)
+        self.C_F = - np.sqrt(  # Riera (45)
             2 * pi * self.omega_L /
-            self.V * (1/self.eps_a_inf - 1/self.eps_a_0)
+            self.volume * (1 / self.eps_inf_in - 1 / self.eps0_in)
         )
-        self.high_mu = self.r_0 / np.sqrt(self._beta_div2) * np.sqrt(self.gamma)
+        self.high_mu = self.R / np.sqrt(self._beta_div2) * np.sqrt(self.gamma)
         self.alpha = np.sqrt(
-            (self.eps_a_0 - self.eps_a_inf) * self.omega_T2 / 4 * np.pi)
+            (self.eps0_in - self.eps_inf_in) * self.omega_T2 / 4 * np.pi)
 
         self._u_norm_dict = dict()
 
@@ -102,8 +100,8 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
             else:
                 l, m, n = self.get_nums(state)
                 return (
-                    self.C_F * self.r_0 / self.mu_nl(state) *
-                    (2 * l + 1) * 1j**(l % 2) * np.sqrt(2*pi) *
+                    self.C_F * self.R / self.mu_nl(state) *
+                    (2 * l + 1) * 1j ** (l % 2) * np.sqrt(2*pi) *
                     self.Phi_ln(state)(r)
                 )
         return hfunc
@@ -126,7 +124,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
             ediv = self._eps_div
             dj_mu = _j(l, d=1)(mu_n)
             j_mu = _j(l)(mu_n)
-            r0 = self.r_0
+            r0 = self.R
             if dr == 0 and r <= r0:
                 return (
                     -_j(l)(mu_n*r/r0) * (l + (l + 1) * ediv) +
@@ -169,7 +167,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         mu2, nu2 = mu**2, nu**2
         return (
             (self.omega_T2 + self.omega_L2) / 2 -
-            (self.beta_L2 * mu2 + self.beta_T2 * nu2) / 2 / self.r_0**2
+            (self.beta_L2 * mu2 + self.beta_T2 * nu2) / 2 / self.R ** 2
         )
 
     def _Q2(self, mu, nu):
@@ -179,7 +177,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         return (self.omega_L2 - self.omega2(mu=mu, nu=nu)) / self.beta_L2
 
     def _F_l(self, l, nu):
-        r0 = self.r_0
+        r0 = self.R
         g = _g(l)(nu)
         dg = _g(l, d=1)(nu)
         return (
@@ -188,7 +186,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         )
 
     def _G_l(self, l, nu):
-        r0 = self.r_0
+        r0 = self.R
         dg = _g(l, d=1)(nu)
         g = _g(l)(nu)
         ediv = self._eps_div
@@ -206,13 +204,13 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         muk = mu
         ediv = self._eps_div
         return (
-            self.gamma * (self.r_0 / nu) ** 2 *
+            self.gamma * (self.R / nu) ** 2 *
             (muk * _j(l, d=1)(mu) + (l + 1) * ediv * _j(l)(mu)) /
             (l + ediv*(l+1))
         )
 
     def _u_unnormalized(self, state):
-        r0 = self.r_0
+        r0 = self.R
         mu, nu = self.mu_nl(state), self.nu_nl(state)
 
         def ufunc(r, theta, phi):
@@ -255,7 +253,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
             u = ufunc(r, theta, phi)
             return lin.norm(u, ord=2)**2 * r**2 * np.sin(theta)
         ans_real = integ.nquad(
-            intfunc, ranges=[(0, self.r_0), (0, np.pi), (0, 2*np.pi)])[0]
+            intfunc, ranges=[(0, self.R), (0, np.pi), (0, 2 * np.pi)])[0]
         self._u_norm_dict[nums] = np.sqrt(ans_real)
         return self._u_norm(state=state)
 
@@ -274,10 +272,10 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         """
         def phifn(r):
             l, m, n = self.get_nums(state)
-            if r < self.r_0:
-                epsinf = self.eps_a_inf
+            if r < self.R:
+                epsinf = self.eps_inf_in
             else:
-                epsinf = self.eps_b_inf
+                epsinf = self.eps_inf_out
             return (
                 4 * np.pi * self.alpha / epsinf /
                 (l + (l + 1) * self._eps_div) / self._u_norm(state) *
@@ -315,10 +313,10 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         gives the polarization vector defined in Roca (4)
         """
         def pfunc(r, theta, phi):
-            if r < self.r_0:
-                epsinf = self.eps_a_inf
+            if r < self.R:
+                epsinf = self.eps_inf_in
             else:
-                epsinf = self.eps_b_inf
+                epsinf = self.eps_inf_out
             return (
                 self.alpha * self.u(state)(r, theta, phi) -
                 (epsinf - 1)/np.pi/4 *
@@ -347,7 +345,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
 
     def _nu(self, mu):
         mu = complex(mu)
-        return np.sqrt(self._beta_div2 * mu**2 - self.r_0**2 * self.gamma)
+        return np.sqrt(self._beta_div2 * mu ** 2 - self.R ** 2 * self.gamma)
 
     def plot_root_function_mu(self, l, xdat, show=True):
         mudat_p = xdat
@@ -452,5 +450,5 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
 
     def _get_root_func2(self, *args, **kwargs):
         def rf2(mu, nu):
-            return (mu**2 * self._beta_div2 - nu**2) - self.r_0**2 * self.gamma
+            return (mu**2 * self._beta_div2 - nu**2) - self.R ** 2 * self.gamma
         return rf2
