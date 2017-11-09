@@ -9,100 +9,28 @@ from root_solver_2d import RootSolverComplex2d
 from ModelSpace import ModelSpace
 
 
-class ExitonModelSpace(ModelSpace):
-    def __init__(self, nmax, lmax, wavefunctions):
-        self.nmax = nmax
-        self.lmax = lmax
-        self.nlen = self.nmax + 1
-        self.llen = self.lmax + 1
-        self.wavefunctions = wavefunctions
-
-    def nfock(self, mode):
-        return 2
-
-    def modes(self):
-        for band in range(2):
-            for l in range(self.llen):
-                for m in range(-l, l+1):
-                    for n in range(self.nlen):
-                        yield (band, l, m, n)
-
-    def states(self):
-        return self.wavefunctions.iter_states()
-
-    def destroy(self, mode):
-        """Returns a destruction operator for the given mode
-        """
-        ops = []
-        for m, i in zip(self.modes(), it.count()):
-            if m == mode:
-                ops.append(qt.sigmam())
-            else:
-                ops.append(qt.qeye(self.nfock(mode)))
-        return qt.tensor(ops)
-
-    def get_nums(self, state):
-        return state
-
-    def get_ket(self, state):
-        return self.create(mode=state) * self.vacuum()
-
-    def get_omega(self, state):
-        # TODO: verify
-        band, l, m, n = self.get_nums(state)
-        mu_in = self.wavefunctions.mu_in(band)
-        r0 = self.wavefunctions.r_0
-        x = self.wavefunctions.x(state)
-        e = 1/2 / mu_in * x**2 / r0**2
-        return complex(e).real
-
-    def get_wavefunction_rad(self, state):
-        return self.wavefunctions.wavefunction_env_radial(state)
-
-    def get_wavefunction_ang(self, state):
-        return self.wavefunctions.wavefunction_env_angular(state)
-
-
-class ElectronModelSpace(ExitonModelSpace):
-    def modes(self):
-        for l in range(self.llen):
-            for m in range(-l, l+1):
-                for n in range(self.nlen):
-                    yield (0, l, m, n)
-
-
-class HoleModelSpace(ExitonModelSpace):
-    def modes(self):
-        for l in range(self.llen):
-            for m in range(-l, l+1):
-                for n in range(self.nlen):
-                    yield (1, l, m, n)
-
-
-class ExitonWavefunctions(RootSolverComplex2d):
+class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
     def __init__(
-            self, r_0, V_v, V_c, me_eff_in, mh_eff_in, me_eff_out, mh_eff_out,
-            expected_roots_x_lj, n_max, l_max
+            self, nmax, lmax,
+            r_0, V_v, V_c, me_eff_in, mh_eff_in, me_eff_out, mh_eff_out,
+            expected_roots_x_lj,
     ):
         """
         :param V_v: Effective potential (?) of the valence band
         :param V_c: Effective potential (?) of the conduction band
-        :param E_gap: Gap energy between conduction and valence bands
         :param me_eff_in: Effective electron mass in nanostructures
         :param mh_eff_in: Effective hole mass in nanostructures
         :param me_eff_out: Free electron mass
         :param mh_eff_out: Free hole mass
         :param expected_roots_x_lj: A dictionary matching (l, j) to an
         ordered list of expected x_lnj, where j is 1 (electron) or 2 (hole)
-        :param num_n: Number of modes to solve for and include in calculations.
-        :param num_l: Number of angular momentum states to solve for an
         include in calcuations
         """
-        # Model constants
-        self.num_n = n_max + 1
-        self.num_l = l_max + 1
-        self.ms = ExitonModelSpace(nmax=self.num_n - 1, lmax=self.num_l - 1,
-                                   wavefunctions=self)
+        # Model space constants
+        self.nmax = nmax
+        self.lmax = lmax
+        self.num_n = self.nmax + 1
+        self.num_l = self.lmax + 1
 
         # Band-dependent physical constants (1: conduction, 2: valence)
         self._Veff = [V_c, V_v]
@@ -120,18 +48,52 @@ class ExitonWavefunctions(RootSolverComplex2d):
 
         self._psi_rad_norm_dict = dict()  # l, n, band -> psi_rad_norm
 
-    # -- States --
-    def iter_states(self):
+    def nfock(self, mode):
+        return 2
+
+    def modes(self):
+        for band in range(2):
+            for l in range(self.num_l):
+                for m in range(-l, l+1):
+                    for n in range(self.num_n):
+                        yield (band, l, m, n)
+
+    def states(self):
         """Returns an iterator for the set of basis states for which
         the boundary value problem has solutions
         """
-        for state in self.ms.modes():
+        for state in self.modes():
             if self.x(state) is not None:
                 yield state
 
+    def destroy(self, mode):
+        """Returns a destruction operator for the given mode
+        """
+        ops = []
+        for m, i in zip(self.modes(), it.count()):
+            if m == mode:
+                ops.append(qt.sigmam())
+            else:
+                ops.append(qt.qeye(self.nfock(mode)))
+        return qt.tensor(ops)
+
+    def get_nums(self, state):
+        return state
+
+    def get_ket(self, state):
+        return self.create(mode=state) * self.vacuum_ket()
+
+    def get_omega(self, state):
+        # TODO: verify
+        band, l, m, n = self.get_nums(state)
+        mu_in = self.mu_in(band)
+        e = 1/2 / mu_in * self.x(state)**2 / self.r_0**2
+        return complex(e).real
+
+    # -- States --
     def iter_x_n(self, l, band):
-        for state in self.iter_states():
-            band0, l0, m0, n0 = self.ms.get_nums(state)
+        for state in self.states():
+            band0, l0, m0, n0 = self.get_nums(state)
             if band0 == band and l0 == l and m0 == 0:
                 yield self.x(state), n0
 
@@ -140,7 +102,7 @@ class ExitonWavefunctions(RootSolverComplex2d):
         A, B = self._A_B(state)
         x = self.x(state)
         y = self.y(state)
-        band, l, m, n = self.ms.get_nums(state)
+        band, l, m, n = self.get_nums(state)
 
         def psifn(r, d_r=0):
             if r <= self.r_0:
@@ -157,21 +119,21 @@ class ExitonWavefunctions(RootSolverComplex2d):
             return abs(psi)**2 * r**2
         return np.sqrt(integ.quad(intfn, 0, np.inf)[0])
 
-    def wavefunction_env_radial(self, state):
+    def wavefunction_envelope_radial(self, state):
         def psifn(r, d_r=0):
             psi = self._Psi_rad_unnormalized_lnj(state)
             norm = self._Psi_rad_norm_lnj(state)
             return psi(r, d_r=d_r) / norm
         return psifn
 
-    def wavefunction_env_angular(self, state):
-        band, l, n, m = self.ms.get_nums(state)
+    def wavefunction_envelope_angular(self, state):
+        band, l, n, m = self.get_nums(state)
         return Y_lm(l=l, m=m)
 
-    def wavefunction_env(self, state):
+    def wavefunction_envelope(self, state):
         def psifn(r, theta, phi):
-            return (self.wavefunction_env_radial(state)(r) *
-                    self.wavefunction_env_angular(state)(theta, phi))
+            return (self.wavefunction_envelope_radial(state)(r) *
+                    self.wavefunction_envelope_angular(state)(theta, phi))
         return psifn
 
     def wavefunction_bloch(self, band):
@@ -195,14 +157,14 @@ class ExitonWavefunctions(RootSolverComplex2d):
     def _A_B(self, state):
         """I have redefined these to be unnormalized coefficients
         """
-        band, l, m, n = self.ms.get_nums(state)
+        band, l, m, n = self.get_nums(state)
         jln = j_sph(l=l)(self.x(state))
         kln = k_sph(l=l)(self.y(state))
         return kln, jln
 
     # -- Obtaining roots --
     def x(self, state):
-        band, l, m, n = self.ms.get_nums(state)
+        band, l, m, n = self.get_nums(state)
         nums = l, n, band
         if nums in self._x:
             return self._x[nums]
@@ -210,7 +172,7 @@ class ExitonWavefunctions(RootSolverComplex2d):
             return None  # TODO
 
     def y(self, state):
-        band, l, m, n = self.ms.get_nums(state)
+        band, l, m, n = self.get_nums(state)
         nums = l, n, band
         if nums in self._y:
             return self._y[nums]
