@@ -9,7 +9,7 @@ from root_solver_2d import RootSolverComplex2d
 from ModelSpace import ModelSpace
 
 
-class ElectronHoleModelSpace(ModelSpace):
+class ExitonModelSpace(ModelSpace):
     def __init__(self, nmax, lmax, wavefunctions):
         self.nmax = nmax
         self.lmax = lmax
@@ -63,7 +63,7 @@ class ElectronHoleModelSpace(ModelSpace):
         return self.wavefunctions.wavefunction_env_angular(state)
 
 
-class ElectronModelSpace(ElectronHoleModelSpace):
+class ElectronModelSpace(ExitonModelSpace):
     def modes(self):
         for l in range(self.llen):
             for m in range(-l, l+1):
@@ -71,7 +71,7 @@ class ElectronModelSpace(ElectronHoleModelSpace):
                     yield (0, l, m, n)
 
 
-class HoleModelSpace(ElectronHoleModelSpace):
+class HoleModelSpace(ExitonModelSpace):
     def modes(self):
         for l in range(self.llen):
             for m in range(-l, l+1):
@@ -79,7 +79,7 @@ class HoleModelSpace(ElectronHoleModelSpace):
                     yield (1, l, m, n)
 
 
-class ElectronHoleWavefunctions(RootSolverComplex2d):
+class ExitonWavefunctions(RootSolverComplex2d):
     def __init__(
             self, r_0, V_v, V_c, me_eff_in, mh_eff_in, me_eff_out, mh_eff_out,
             expected_roots_x_lj, n_max, l_max
@@ -101,8 +101,8 @@ class ElectronHoleWavefunctions(RootSolverComplex2d):
         # Model constants
         self.num_n = n_max + 1
         self.num_l = l_max + 1
-        self.ms = ElectronHoleModelSpace(nmax=self.num_n-1, lmax=self.num_l-1,
-                                         wavefunctions=self)
+        self.ms = ExitonModelSpace(nmax=self.num_n - 1, lmax=self.num_l - 1,
+                                   wavefunctions=self)
 
         # Band-dependent physical constants (1: conduction, 2: valence)
         self._Veff = [V_c, V_v]
