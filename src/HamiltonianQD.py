@@ -1,40 +1,64 @@
-"""HamiltonianQD.py
-Definition of a macroscopic, continuous Hamiltonian for describing the
-interaction of the phonon modes of a quantum dot with an electromagnetic
-field.
-
-The definitions used in the theoretical model are based on
-
-Electron Raman Scattering in Nanostructures
-R. Betancourt-Riera, R. Riera, J. L. Marin
-Centro de Investigacion en Fisica, Universidad de Sonora, 83190 Hermosillo, Sonora, Mexico
-R. Rosas
-Departamento de Fisica, Universidad de Sonora, 83000 Hermosillo, Sonora, Mexico
-"""
-import itertools as it
-from math import pi
-
 import numpy as np
-import qutip as qt
+from math import pi
 from matplotlib import pyplot as plt
-from scipy import integrate as integ
 from scipy import linalg as lin
-from helper_functions import Y_lm
-from helper_functions import j_sph as _j
-from helper_functions import g_sph as _g
+from scipy import integrate as integ
+from helper_functions import Y_lm, j_sph as _j, g_sph as _g
+from helper_functions import basis_roca
 from root_solver_2d import RootSolverComplex2d
+from ModelSpace import ModelSpace
 
 
-class HamiltonianQD(RootSolverComplex2d):
+class PhononModelSpace(ModelSpace):
+    def __init__(self, nmax, lmax, electric_potential):
+        self.nmax = nmax
+        self.lmax = lmax
+        self.nlen = self.nmax + 1
+        self.llen = self.lmax + 1
+        self.electric_potential = electric_potential
+
+    def nfock(self, mode):
+        return 2
+
+    def modes(self):
+        for l in range(self.llen):
+            for m in range(-l, l+1):
+                for n in range(self.nlen):
+                    yield (l, m, n)
+
+    def states(self):
+        return self.electric_potential.iter_states()
+
+    def get_nums(self, state):
+        return state
+
+    def get_ket(self, state):
+        return self.create(mode=state) * self.vacuum_ket()
+
+    def get_omega(self, state):
+        # TODO: Verify
+        mu = self.electric_potential.mu_nl(state)
+        nu = self.electric_potential.nu_nl(state)
+        omega2 = self.electric_potential.omega2(mu=mu, nu=nu)
+        return np.sqrt(omega2)
+
+    def get_phi_rad(self, state):
+        return self.electric_potential.phi_rad_ln(state)
+
+    def get_phi_ang(self, state):
+        return self.electric_potential.phi_ang_lm(state)
+
+
+class PhononPotentialOperator(RootSolverComplex2d):
     def __init__(self, r_0, omega_L, omega_T, num_n, num_l,
                  epsilon_inf_qdot, epsilon_inf_env, beta_T, beta_L,
                  expected_roots_mu_l, electron_charge=1,
-                 large_R_approximation=False, verbose=False):
+                 large_R_approximation=False):
         # Model constants
         self.num_n = num_n
         self.num_l = num_l
-        self.n_max = self.num_n - 1
-        self.l_max = self.num_l - 1
+        self.ms = PhononModelSpace(nmax=self.num_n-1, lmax=self.num_l-1,
+                                   electric_potential=self)
 
         # Physical constants
         self.r_0 = r_0
@@ -65,7 +89,11 @@ class HamiltonianQD(RootSolverComplex2d):
             2 * pi * self.omega_L /
             self.V * (1/self.eps_a_inf - 1/self.eps_a_0)
         )
-        self.low_mu = self.r_0 / np.sqrt(self._beta_div2) * np.sqrt(self.gamma)
+        self.high_mu = self.r_0 / np.sqrt(self._beta_div2) * np.sqrt(self.gamma)
+        self.alpha = np.sqrt(
+            (self.eps_a_0 - self.eps_a_inf) * self.omega_T2 / 4 * np.pi)
+
+        self._u_norm_dict = dict()
 
         # Root finding
         self._roots_mu = dict()  # l, n -> mu
@@ -74,103 +102,88 @@ class HamiltonianQD(RootSolverComplex2d):
         self._large_R = large_R_approximation
         self._fill_roots_mu_nu()
 
-        # Other storage dictionaries
-        self._u2 = dict()  # l, n -> abs(u)**2
+    def phi_rad_ln(self, state):
+        def hfunc(r):
+            if state is self.ms.vacuum_state():
+                return 0
+            else:
+                l, m, n = self.ms.get_nums(state)
+                return (
+                    self.C_F * self.r_0 / self.mu_nl(state) *
+                    (2 * l + 1) * 1j**(l % 2) * np.sqrt(2*pi) *
+                    self.Phi_ln(state)(r)
+                )
+        return hfunc
 
-        self._verbose = verbose
+    def phi_ang_lm(self, state):
+        if state is self.ms.vacuum_state():
+            return 0
+        else:
+            l, m, n = self.ms.get_nums(state)
+            return Y_lm(l=l, m=m)
 
-    # -- Hamiltonian --
-    def H_epi(self, r, theta, phi):
-        """Electron-phonon interaction Hamiltonian at spherical coordinates
-        (r, theta, phi). The definition is based on Roca (42) and
-        Riera (60).
-        """
-        h = 0
-        for l, m, n in self.iter_lmn():
-            h += (
-                self._H_ep_rad_ln(l=l, n=n)(r) * Y_lm(l=l, m=m)(theta, phi) *
-                self._b(l=l, m=m, n=n)
-            )
-        return 1/2 * (h + h.dag())
-
-    def _H_ep_rad_ln(self, l, n):
-        def hrfn(r):
-            return (
-                self.r_0 * self.C_F * np.sqrt(4*np.pi/3) *
-                self.Phi_ln(l=l, n=n)(r)
-            )
-        return hrfn
-
-    def Phi_ln(self, l, n):
+    def Phi_ln(self, state):
         """See Roca (43) and Riera (60)
-        The returned result should be real.
         """
-        mu_n = self.mu_nl(n=n, l=l)
-        if mu_n is None:
-            return lambda r: 0  # TODO find a better way
-        ediv = self._eps_div
-        dj_mu = _j(l, d=1)(mu_n)
-        j_mu = _j(l)(mu_n)
-        abs_u = self._norm_u(n=n, l=l)
-
-        def phifn(r):
+        def phifn(r, dr=0):
+            if state is self.ms.vacuum_state():
+                return 0
+            l, m, n = self.ms.get_nums(state)
+            mu_n = self.mu_nl(state)
+            ediv = self._eps_div
+            dj_mu = _j(l, d=1)(mu_n)
+            j_mu = _j(l)(mu_n)
             r0 = self.r_0
-            if r <= r0:
-                phicplx = np.sqrt(r0) / abs_u * (
-                    _j(l)(mu_n*r/r0) -
+            if dr == 0 and r <= r0:
+                return (
+                    -_j(l)(mu_n*r/r0) * (l + (l + 1) * ediv) +
+                    (mu_n * dj_mu + (l + 1) * ediv * j_mu) * (r/r0)**l
+                )
+            elif dr == 0:
+                return (mu_n * dj_mu - l * ediv * j_mu) * (r/r0)**(-l-1)
+            elif dr == 1 and r <= r0:
+                return (
+                    -mu_n/r0 * _j(l, d=1)(mu_n*r/r0) * (l + (l + 1) * ediv) +
                     (mu_n * dj_mu + (l + 1) * ediv * j_mu) *
-                    (r/r0)**l / (l + (l + 1) * ediv)
+                    l/r0 * (r/r0)**(l-1)
+                )
+            elif dr == 1:
+                return (
+                    (mu_n * dj_mu - l * ediv * j_mu) * (-l-1)/r0 *
+                    (r/r0)**(-l-2)
                 )
             else:
-                phicplx = np.sqrt(r0) / abs_u * (
-                    (-mu_n * dj_mu + l * ediv * j_mu) *
-                    (r0/r)**(l+1) / (l + (l + 1) * ediv)
-                )
-            return complex(phicplx).real  # TODO: Should this be here?
+                return None  # TODO
         return phifn
 
-    def _b(self, l, m, n):
-        return qt.qeye(2)  # TODO
-
-    def iter_lmn(self):
-        for l in range(self.l_max+1):
-            for m in range(-l, l+1):
-                for mu_n, n in self.iter_mu_n(l=l):
-                    yield l, m, n
+    # -- States --
+    def iter_states(self):
+        """Returns an iterator for the set of basis states for which
+        the boundary value problem has solutions
+        """
+        for state in self.ms.modes():
+            if self.mu_nl(state) is not None:
+                yield state
 
     def iter_mu_n(self, l):
-        for n in range(self.num_n):
-            mu = self.mu_nl(n=n, l=l)
-            if mu is not None:
-                yield mu, n
-
-    def iter_omega_n(self, l):
-        for mu, n in self.iter_mu_n(l):
-            yield self.omega(mu=mu), n
+        for state in self.iter_states():
+            l0, m0, n0 = self.ms.get_nums(state)
+            if l0 == l and m0 == 0:
+                yield self.mu_nl(state), n0
 
     # -- Getters --
-    def omega(self, l=None, n=None, mu=None, nu=None):
-        if mu is not None and nu is not None:
-            omega2 = self._omega2(mu2=mu**2, nu2=nu**2)
-            return np.sqrt(omega2)
-        else:
-            return self.omega(mu=self.mu_nl(n=n, l=l), nu=self.nu_nl(n=n, l=l))
-
-    def _omega2(self, mu2, nu2):
+    def omega2(self, mu, nu):
+        mu2, nu2 = mu**2, nu**2
         return (
             (self.omega_T2 + self.omega_L2) / 2 -
             (self.beta_L2 * mu2 + self.beta_T2 * nu2) / 2 / self.r_0**2
         )
 
     def _Q2(self, mu, nu):
-        return (
-            (self.omega_T2 - self._omega2(mu2=mu**2, nu2=nu**2)) / self.beta_T2
-        )
+        return (self.omega_T2 - self.omega2(mu=mu, nu=nu)) / self.beta_T2
 
     def _q2(self, mu, nu):
-        return (
-            (self.omega_L2 - self._omega2(mu2=mu**2, nu2=nu**2)) / self.beta_L2
-        )
+        return (self.omega_L2 - self.omega2(mu=mu, nu=nu)) / self.beta_L2
 
     def _F_l(self, l, nu):
         r0 = self.r_0
@@ -189,44 +202,6 @@ class HamiltonianQD(RootSolverComplex2d):
         ll = (l + (l + 1) * ediv)
         return self.gamma * (r0/nu)**2 * ediv * -(nu * dg - l * g) + ll * g
 
-    def _norm_u(self, n, l):
-        return np.sqrt(self._norm_u2(n=n, l=l))
-
-    def _norm_u2(self, n, l):
-        if (l, n) in self._u2:
-            return self._u2[l, n]
-        # If not in dictionary, calculate
-        mu = self.mu_nl(n=n, l=l)
-        nu = self.nu_nl(n=n, l=l)
-        r0 = self.r_0
-        mu0 = mu / r0
-        nu0 = nu / r0
-        pl = self._p_l(l=l, mu=mu, nu=nu)
-        tl = self._t_l(l=l, mu=mu, nu=nu)
-
-        def ifn(r):
-            g = _g(l)(nu0 * r)
-            dg = _g(l, d=1)(nu0 * r)
-            j = _j(l)(mu0 * r)
-            dj = _j(l, d=1)(mu0 * r)
-            abs_ur2 = abs(
-                -mu0 * dj + l * (l+1) / r * pl * g -
-                tl * l / r0 * (r/r0) ** (l-1)
-            )**2
-            if l == 0:
-                return r**2 * abs_ur2
-            else:
-                return (
-                    r**2 * abs_ur2 +
-                    l * (l + 1) +
-                    r**2 * abs(
-                        -j + pl / l * (g + nu0 * r * dg) -
-                        tl * (r/r0) ** l
-                    )**2
-                )
-        self._u2[l, n] = integ.quad(func=ifn, a=0, b=self.r_0)[0]
-        return self._norm_u2(l=l, n=n)
-
     def _p_l(self, l, mu, nu):
         muk = mu
         return (
@@ -243,62 +218,205 @@ class HamiltonianQD(RootSolverComplex2d):
             (l + ediv*(l+1))
         )
 
+    def _u_unnormalized(self, state):
+        r0 = self.r_0
+        mu, nu = self.mu_nl(state), self.nu_nl(state)
+
+        def ufunc(r, theta, phi):
+            if state is self.ms.vacuum_state():
+                return np.zeros(3)
+            elif r > r0:
+                return np.zeros(3)  # TODO: Is this right?
+            l, m, n = self.ms.get_nums(state)
+            pl = self._p_l(l=l, mu=mu, nu=nu)
+            tl = self._t_l(l=l, mu=mu, nu=nu)
+            u = np.zeros(3, dtype=complex)
+            basis = basis_roca(theta, phi, l=l, m=m)
+            ur = (
+                -mu/r0 * _j(l, d=1)(mu * r/r0) +
+                l*(l + 1)/r * pl * _g(l)(nu * r/r0) -
+                l * tl/r0 * (r/r0)**(l-1)
+            )
+            u += ur * Y_lm(l, m)(theta, phi) * basis[0]
+            if l == 0:
+                return u
+            u3 = -1j * np.sqrt(l*(l+1))/r * (
+                -_j(l)(mu * r/r0) +
+                pl * (_g(l)(nu * r/r0) + nu*r/r0 * _g(l, d=1)(nu * r/r0)) -
+                tl * (r/r0)**l
+            )
+            u += u3 * basis[2]
+            return u
+        return ufunc
+
+    def _u_norm(self, state):
+        nums = self.ms.get_nums(state)
+        if state is self.ms.vacuum_state():
+            return 1
+        elif nums in self._u_norm_dict:
+            return self._u_norm_dict[nums]
+
+        ufunc = self._u_unnormalized(state)
+
+        def intfunc(r, theta, phi):
+            u = ufunc(r, theta, phi)
+            return lin.norm(u, ord=2)**2 * r**2 * np.sin(theta)
+        ans_real = integ.nquad(
+            intfunc, ranges=[(0, self.r_0), (0, np.pi), (0, 2*np.pi)])[0]
+        self._u_norm_dict[nums] = np.sqrt(ans_real)
+        return self._u_norm(state=state)
+
+    def u(self, state):
+        def ufunc(r, theta, phi):
+            return (
+                self._u_unnormalized(state)(r, theta, phi) /
+                self._u_norm(state)
+            )
+        return ufunc
+
+    # TODO: Check correctness
+    def phi_rad(self, state):
+        """Returns the phi function with the proper normalization so as
+        to match with the normalized u return by `u`
+        """
+        def phifn(r):
+            l, m, n = self.ms.get_nums(state)
+            if r < self.r_0:
+                epsinf = self.eps_a_inf
+            else:
+                epsinf = self.eps_b_inf
+            return (
+                4 * np.pi * self.alpha / epsinf /
+                (l + (l + 1) * self._eps_div) / self._u_norm(state) *
+                self.Phi_ln(state)(r)
+            )
+        return phifn
+
+    def phi(self, state):
+        """Returns the phi function with the proper normalization so as
+        to match with the normalized u return by `u`
+        """
+        def phifn(r, theta, phi):
+            l, m, n = self.ms.get_nums(state)
+            return self.phi_rad(state)(r) * Y_lm(l, m)(theta, phi)
+        return phifn
+
+    def grad_phi(self, state):
+        """Returns the gradient of phi as a function of spatial coordinates
+        (r, theat, phi). To take the gradient, we use the handy
+        equation (A10) of Roca
+        """
+        def gphifunc(r, theta, phi):
+            l, m, n = self.ms.get_nums(state)
+            basis = basis_roca(theta=theta, phi=phi, l=l, m=m)
+            phi_r = self.Phi_ln(state)(r)
+            phi_ang = Y_lm(l=l, m=m)(theta, phi)
+            grad_phi_r = self.Phi_ln(state)(r, dr=1) * basis[0]
+            grad_phi_ang = -1j/r * np.sqrt(l*(l+1)) * basis[2]
+            return phi_r * grad_phi_ang + phi_ang * grad_phi_r
+        return gphifunc
+
+    # TODO: Check correctness
+    def P(self, state):
+        """Returns a function of spatial coordinates (r, theta, phi) which
+        gives the polarization vector defined in Roca (4)
+        """
+        def pfunc(r, theta, phi):
+            if r < self.r_0:
+                epsinf = self.eps_a_inf
+            else:
+                epsinf = self.eps_b_inf
+            return (
+                self.alpha * self.u(state)(r, theta, phi) -
+                (epsinf - 1)/np.pi/4 *
+                self.grad_phi(state)(r, theta, phi)
+            )
+        return pfunc
+
     # -- Root finding --
-    def nu_nl(self, n, l):
+    def nu_nl(self, state):
+        if state is self.ms.vacuum_state():
+            return 0
+        l, m, n = self.ms.get_nums(state)
         if (l, n) in self._roots_nu:
             return self._roots_nu[l, n]
         else:
-            raise RuntimeError  # TODO
+            return None  # TODO
 
-    def mu_nl(self, n, l):
+    def mu_nl(self, state):
+        if state is self.ms.vacuum_state():
+            return 0
+        l, m, n = self.ms.get_nums(state)
         if (l, n) in self._roots_mu:
             return self._roots_mu[l, n]
         else:
             return None  # TODO
 
-    def _nu2(self, mu2):
-        mu2 = complex(mu2)
-        return self._beta_div2 * mu2 - self.r_0**2 * self.gamma
-
     def _nu(self, mu):
         mu = complex(mu)
-        return np.sqrt(self._nu2(mu2=mu**2))
+        return np.sqrt(self._beta_div2 * mu**2 - self.r_0**2 * self.gamma)
 
     def plot_root_function_mu(self, l, xdat, show=True):
-        mudat = xdat + self.low_mu
+        mudat_p = xdat
+        mudat_m = -xdat
         fn = self._get_root_function(l=l)
 
         def rootfn(xy):
             mu, nu = xy
-            fr, fi, gr, gi = fn(np.array([mu.real, mu.imag, nu.real, nu.imag]))
-            return np.array([fr + 1j * fi, gr + 1j * gi])
+            f, g = fn(np.array([mu, nu]))
+            return np.array([f, g])
 
         def fpr(mu):
             nu = self._nu(mu=mu)
-            return np.real(rootfn(np.array([mu, nu])))[0]
+            return rootfn(np.array([mu, nu]))[0]
 
         fig, ax = plt.subplots(1, 1)
         ax.axhline(0, color='gray', lw=1, alpha=.5)
+        ax.axvline(0, color='gray', lw=1, alpha=.5)
+        ax.axvline(self.high_mu, ls='-', color='black', lw=1, alpha=.5)
+        ax.axvline(-self.high_mu, ls='-', color='black', lw=1, alpha=.5)
 
-        for n in range(self.num_n):
-            mu = self.mu_nl(l=l, n=n)
-            if mu is None:
-                continue  # TODO
-            ax.axvline(mu.real-self.low_mu, ls='--', color='green',
-                       lw=1, alpha=.5)
+        xdat = np.concatenate((-xdat, xdat))
+        xdat.sort()
+        mudat = np.concatenate((mudat_m, mudat_p))
+        mudat.sort()
 
         ydat = np.array([fpr(x) for x in mudat])
         ydat /= lin.norm(ydat, ord=2)
-        ax.plot(xdat, ydat, '-', color='red')
+        liner, = ax.plot(xdat, np.real(ydat), '-', color='red')
+        linei, = ax.plot(xdat, np.imag(ydat), '-', color='blue')
 
-        # ylog = np.log(np.abs(ydat))
-        # ylog /= lin.norm(ylog, ord=2)
-        # ax.plot(xdat, ylog, '--', color='red')
+        ylog = np.log(np.abs(ydat))
+        ylog /= lin.norm(ylog, ord=2)
+        ax.plot(xdat, ylog, '--', color='brown')
 
-        ypr = np.real(np.sqrt([self._nu2(mu2=x**2) for x in mudat]))
+        ypr = np.array([self._nu(x) for x in mudat])
         ypr /= lin.norm(ypr, ord=2)
-        ax.plot(xdat, ypr, '-', color='blue')
-        ax.plot(xdat, -ypr, '-', color='blue')
+
+        # Region of imaginary Q
+        x_min_imQ = max(min(xdat), -self.high_mu)
+        x_max_imQ = min(max(xdat), self.high_mu)
+        span_imQ = ax.axvspan(x_min_imQ, x_max_imQ, color='blue', alpha=.3)
+
+        # Regions of real Q
+        x_min_reQ = max(min(xdat), self.high_mu)
+        x_max_reQ = max(xdat)
+        span_reQ = ax.axvspan(x_min_reQ, x_max_reQ, color='red', alpha=.3)
+        ax.axvspan(-x_max_reQ, -x_min_reQ, color='red', alpha=.3)
+
+        for mu, n in self.iter_mu_n(l=l):
+            if n < 0:
+                pltzero = mu.real
+            else:
+                pltzero = mu.real
+            ax.axvline(pltzero, ls='--', color='green', lw=1, alpha=.5)
+
+        ax.set_title('Phonon root function for l = {}'.format(l))
+        ax.legend(
+            (liner, linei, span_imQ, span_reQ),
+            ('root equation (real part)', 'root equation (imaginary part)',
+             'imaginary Q', 'real Q')
+        )
 
         if show:
             plt.show()
@@ -306,7 +424,7 @@ class HamiltonianQD(RootSolverComplex2d):
 
     def _fill_roots_mu_nu(self):
         for l in range(self.num_l):
-            for root, n in zip(self._solve_roots_xy(l=l), range(self.num_n)):
+            for root, n in self._solve_roots_xy(l=l):
                 mu, nu = root
                 assert not np.isnan(mu)  # TODO
                 assert not np.isnan(nu)  # TODO
@@ -314,10 +432,11 @@ class HamiltonianQD(RootSolverComplex2d):
                 self._roots_nu[l, n] = nu
 
     def _get_expected_roots_xy(self, l, *args, **kwargs):
-        for mu0 in self._expected_roots_mu[l]:
-            mu0 = complex(mu0+self.low_mu)
-            nu0 = np.sqrt(self._nu2(mu2=mu0**2))
-            yield np.array([mu0, nu0])
+        start, mu_roots = self._expected_roots_mu[l]
+        for mu0, n in zip(mu_roots, range(start, self.num_n)):
+            mu0 = complex(mu0)
+            nu0 = self._nu(mu=mu0)
+            yield np.array([mu0, nu0], dtype=complex), n
 
     def _get_root_func1(self, l, *args, **kwargs):
         def rf1(mu, nu):
@@ -342,4 +461,3 @@ class HamiltonianQD(RootSolverComplex2d):
         def rf2(mu, nu):
             return (mu**2 * self._beta_div2 - nu**2) - self.r_0**2 * self.gamma
         return rf2
-
