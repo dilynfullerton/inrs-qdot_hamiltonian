@@ -9,56 +9,18 @@ from root_solver_2d import RootSolverComplex2d
 from ModelSpace import ModelSpace
 
 
-class PhononModelSpace(ModelSpace):
-    def __init__(self, nmax, lmax, electric_potential):
+class PhononModelSpace(ModelSpace, RootSolverComplex2d):
+    def __init__(
+            self, nmax, lmax, r_0, omega_L, omega_T, num_n, num_l,
+            epsilon_inf_qdot, epsilon_inf_env, beta_T, beta_L,
+            expected_roots_mu_l, electron_charge=1,
+            large_R_approximation=False
+    ):
+        # Model constants
         self.nmax = nmax
         self.lmax = lmax
-        self.nlen = self.nmax + 1
-        self.llen = self.lmax + 1
-        self.electric_potential = electric_potential
-
-    def nfock(self, mode):
-        return 2
-
-    def modes(self):
-        for l in range(self.llen):
-            for m in range(-l, l+1):
-                for n in range(self.nlen):
-                    yield (l, m, n)
-
-    def states(self):
-        return self.electric_potential.iter_states()
-
-    def get_nums(self, state):
-        return state
-
-    def get_ket(self, state):
-        return self.create(mode=state) * self.vacuum_ket()
-
-    def get_omega(self, state):
-        # TODO: Verify
-        mu = self.electric_potential.mu_nl(state)
-        nu = self.electric_potential.nu_nl(state)
-        omega2 = self.electric_potential.omega2(mu=mu, nu=nu)
-        return np.sqrt(omega2)
-
-    def get_phi_rad(self, state):
-        return self.electric_potential.phi_rad_ln(state)
-
-    def get_phi_ang(self, state):
-        return self.electric_potential.phi_ang_lm(state)
-
-
-class PhononPotentialOperator(RootSolverComplex2d):
-    def __init__(self, r_0, omega_L, omega_T, num_n, num_l,
-                 epsilon_inf_qdot, epsilon_inf_env, beta_T, beta_L,
-                 expected_roots_mu_l, electron_charge=1,
-                 large_R_approximation=False):
-        # Model constants
         self.num_n = num_n
         self.num_l = num_l
-        self.ms = PhononModelSpace(nmax=self.num_n-1, lmax=self.num_l-1,
-                                   electric_potential=self)
 
         # Physical constants
         self.r_0 = r_0
@@ -102,12 +64,43 @@ class PhononPotentialOperator(RootSolverComplex2d):
         self._large_R = large_R_approximation
         self._fill_roots_mu_nu()
 
+    def nfock(self, mode):
+        return 2
+
+    def modes(self):
+        for l in range(self.num_l):
+            for m in range(-l, l+1):
+                for n in range(self.num_n):
+                    yield (l, m, n)
+
+    def states(self):
+        return self.iter_states()
+
+    def get_nums(self, state):
+        return state
+
+    def get_ket(self, state):
+        return self.create(mode=state) * self.vacuum_ket()
+
+    def get_omega(self, state):
+        # TODO: Verify
+        mu = self.mu_nl(state)
+        nu = self.nu_nl(state)
+        omega2 = self.omega2(mu=mu, nu=nu)
+        return np.sqrt(omega2)
+
+    def get_phi_rad(self, state):
+        return self.phi_rad_ln(state)
+
+    def get_phi_ang(self, state):
+        return self.phi_ang_lm(state)
+
     def phi_rad_ln(self, state):
         def hfunc(r):
-            if state is self.ms.vacuum_state():
+            if state is self.vacuum_state():
                 return 0
             else:
-                l, m, n = self.ms.get_nums(state)
+                l, m, n = self.get_nums(state)
                 return (
                     self.C_F * self.r_0 / self.mu_nl(state) *
                     (2 * l + 1) * 1j**(l % 2) * np.sqrt(2*pi) *
@@ -116,19 +109,19 @@ class PhononPotentialOperator(RootSolverComplex2d):
         return hfunc
 
     def phi_ang_lm(self, state):
-        if state is self.ms.vacuum_state():
+        if state is self.vacuum_state():
             return 0
         else:
-            l, m, n = self.ms.get_nums(state)
+            l, m, n = self.get_nums(state)
             return Y_lm(l=l, m=m)
 
     def Phi_ln(self, state):
         """See Roca (43) and Riera (60)
         """
         def phifn(r, dr=0):
-            if state is self.ms.vacuum_state():
+            if state is self.vacuum_state():
                 return 0
-            l, m, n = self.ms.get_nums(state)
+            l, m, n = self.get_nums(state)
             mu_n = self.mu_nl(state)
             ediv = self._eps_div
             dj_mu = _j(l, d=1)(mu_n)
@@ -161,13 +154,13 @@ class PhononPotentialOperator(RootSolverComplex2d):
         """Returns an iterator for the set of basis states for which
         the boundary value problem has solutions
         """
-        for state in self.ms.modes():
+        for state in self.modes():
             if self.mu_nl(state) is not None:
                 yield state
 
     def iter_mu_n(self, l):
         for state in self.iter_states():
-            l0, m0, n0 = self.ms.get_nums(state)
+            l0, m0, n0 = self.get_nums(state)
             if l0 == l and m0 == 0:
                 yield self.mu_nl(state), n0
 
@@ -223,11 +216,11 @@ class PhononPotentialOperator(RootSolverComplex2d):
         mu, nu = self.mu_nl(state), self.nu_nl(state)
 
         def ufunc(r, theta, phi):
-            if state is self.ms.vacuum_state():
+            if state is self.vacuum_state():
                 return np.zeros(3)
             elif r > r0:
                 return np.zeros(3)  # TODO: Is this right?
-            l, m, n = self.ms.get_nums(state)
+            l, m, n = self.get_nums(state)
             pl = self._p_l(l=l, mu=mu, nu=nu)
             tl = self._t_l(l=l, mu=mu, nu=nu)
             u = np.zeros(3, dtype=complex)
@@ -250,8 +243,8 @@ class PhononPotentialOperator(RootSolverComplex2d):
         return ufunc
 
     def _u_norm(self, state):
-        nums = self.ms.get_nums(state)
-        if state is self.ms.vacuum_state():
+        nums = self.get_nums(state)
+        if state is self.vacuum_state():
             return 1
         elif nums in self._u_norm_dict:
             return self._u_norm_dict[nums]
@@ -280,7 +273,7 @@ class PhononPotentialOperator(RootSolverComplex2d):
         to match with the normalized u return by `u`
         """
         def phifn(r):
-            l, m, n = self.ms.get_nums(state)
+            l, m, n = self.get_nums(state)
             if r < self.r_0:
                 epsinf = self.eps_a_inf
             else:
@@ -297,7 +290,7 @@ class PhononPotentialOperator(RootSolverComplex2d):
         to match with the normalized u return by `u`
         """
         def phifn(r, theta, phi):
-            l, m, n = self.ms.get_nums(state)
+            l, m, n = self.get_nums(state)
             return self.phi_rad(state)(r) * Y_lm(l, m)(theta, phi)
         return phifn
 
@@ -307,7 +300,7 @@ class PhononPotentialOperator(RootSolverComplex2d):
         equation (A10) of Roca
         """
         def gphifunc(r, theta, phi):
-            l, m, n = self.ms.get_nums(state)
+            l, m, n = self.get_nums(state)
             basis = basis_roca(theta=theta, phi=phi, l=l, m=m)
             phi_r = self.Phi_ln(state)(r)
             phi_ang = Y_lm(l=l, m=m)(theta, phi)
@@ -335,18 +328,18 @@ class PhononPotentialOperator(RootSolverComplex2d):
 
     # -- Root finding --
     def nu_nl(self, state):
-        if state is self.ms.vacuum_state():
+        if state is self.vacuum_state():
             return 0
-        l, m, n = self.ms.get_nums(state)
+        l, m, n = self.get_nums(state)
         if (l, n) in self._roots_nu:
             return self._roots_nu[l, n]
         else:
             return None  # TODO
 
     def mu_nl(self, state):
-        if state is self.ms.vacuum_state():
+        if state is self.vacuum_state():
             return 0
-        l, m, n = self.ms.get_nums(state)
+        l, m, n = self.get_nums(state)
         if (l, n) in self._roots_mu:
             return self._roots_mu[l, n]
         else:
