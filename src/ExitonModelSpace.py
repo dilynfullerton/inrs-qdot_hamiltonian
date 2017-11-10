@@ -77,11 +77,11 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
                 ops.append(qt.qeye(self.nfock(mode)))
         return qt.tensor(ops)
 
-    def get_nums(self, state):
-        return state
+    def get_nums(self, mode):
+        return mode
 
-    def get_ket(self, state):
-        return self.create(mode=state) * self.vacuum_ket()
+    def get_ket(self, mode):
+        return self.create(mode=mode) * self.vacuum_ket()
 
     def get_omega(self, state):
         # TODO: verify

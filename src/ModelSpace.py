@@ -18,12 +18,13 @@ class ModelSpace:
 
     # -- States --
     def modes(self):
-        """Returns a generator of the full set of orthogonal Fock modes
+        """Returns a generator of the full set of normal single-particle
+        Fock modes
         """
         raise NotImplementedError
 
     def states(self):
-        """Returns a generator of SINGLE PARTICLE basis states, namely all
+        """Returns a generator of single-particle basis states, namely all
         of the states formed by exciting one mode to the first level
         above the vacuum
         """
@@ -34,11 +35,14 @@ class ModelSpace:
         """
         return (self.get_ket(s) for s in self.states())
 
-    def get_ket(self, state):
+    def get_ket(self, mode):
+        """Returns the ket associated with the first exited state in the
+        given single-particle mode
+        """
         raise NotImplementedError
 
-    def get_nums(self, state):
-        """Returns a tuple of identifying quantum numbers for the state
+    def get_nums(self, mode):
+        """Returns a tuple of identifying quantum numbers for the given mode
         """
         raise NotImplementedError
 

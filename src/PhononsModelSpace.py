@@ -7,6 +7,10 @@ from helper_functions import Y_lm, j_sph as _j, g_sph as _g
 from helper_functions import basis_roca
 from root_solver_2d import RootSolverComplex2d
 from ModelSpace import ModelSpace
+from collections import namedtuple
+
+
+PhononMode = namedtuple('PhononMode', ['l', 'm', 'n'])
 
 
 class PhononModelSpace(ModelSpace, RootSolverComplex2d):
@@ -69,21 +73,32 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         for l in range(self.num_l):
             for m in range(-l, l+1):
                 for n in range(self.num_n):
-                    yield (l, m, n)
+                    yield PhononMode(l=l, m=m, n=n)
 
     def states(self):
-        return self.iter_states()
+        """Returns an iterator over single-particle modes that have
+        valid solutions
+        """
+        for mode in self.modes():
+            if self.mu(mode) is not None:
+                yield mode
 
-    def get_nums(self, state):
-        return state
+    def get_nums(self, mode):
+        """Gets the quantum numbers associated with the given
+        single-particle state
+        """
+        return mode.l, mode.m, mode.n
 
-    def get_ket(self, state):
-        return self.create(mode=state) * self.vacuum_ket()
+    def get_ket(self, mode):
+        return self.create(mode=mode) * self.vacuum_ket()
 
     def get_omega(self, state):
+        """Returns the frequency associated with the given single-particle
+        state
+        """
         # TODO: Verify
-        mu = self.mu_nl(state)
-        nu = self.nu_nl(state)
+        mu = self.mu(state)
+        nu = self.nu(state)
         omega2 = self.omega2(mu=mu, nu=nu)
         return np.sqrt(omega2)
 
@@ -95,23 +110,17 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
 
     def phi_rad_ln(self, state):
         def hfunc(r):
-            if state is self.vacuum_state():
-                return 0
-            else:
-                l, m, n = self.get_nums(state)
-                return (
-                    self.C_F * self.R / self.mu_nl(state) *
-                    (2 * l + 1) * 1j ** (l % 2) * np.sqrt(2*pi) *
-                    self.Phi_ln(state)(r)
-                )
+            l = state.l
+            return (
+                self.C_F * self.R / self.mu(state) *
+                (2 * l + 1) * 1j ** (l % 2) * np.sqrt(2*pi) *
+                self.Phi_ln(state)(r)
+            )
         return hfunc
 
     def phi_ang_lm(self, state):
-        if state is self.vacuum_state():
-            return 0
-        else:
-            l, m, n = self.get_nums(state)
-            return Y_lm(l=l, m=m)
+        l, m = state.l, state.m
+        return Y_lm(l=l, m=m)
 
     def Phi_ln(self, state):
         """See Roca (43) and Riera (60)
@@ -119,8 +128,8 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         def phifn(r, dr=0):
             if state is self.vacuum_state():
                 return 0
-            l, m, n = self.get_nums(state)
-            mu_n = self.mu_nl(state)
+            l = state.l
+            mu_n = self.mu(state)
             ediv = self._eps_div
             dj_mu = _j(l, d=1)(mu_n)
             j_mu = _j(l)(mu_n)
@@ -148,19 +157,10 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         return phifn
 
     # -- States --
-    def iter_states(self):
-        """Returns an iterator for the set of basis states for which
-        the boundary value problem has solutions
-        """
-        for state in self.modes():
-            if self.mu_nl(state) is not None:
-                yield state
-
     def iter_mu_n(self, l):
-        for state in self.iter_states():
-            l0, m0, n0 = self.get_nums(state)
-            if l0 == l and m0 == 0:
-                yield self.mu_nl(state), n0
+        for state in self.states():
+            if state.l == l and state.m == 0:
+                yield self.mu(state), state.n
 
     # -- Getters --
     def omega2(self, mu, nu):
@@ -211,14 +211,13 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
 
     def _u_unnormalized(self, state):
         r0 = self.R
-        mu, nu = self.mu_nl(state), self.nu_nl(state)
+        mu, nu = self.mu(state), self.nu(state)
 
         def ufunc(r, theta, phi):
-            if state is self.vacuum_state():
-                return np.zeros(3)
-            elif r > r0:
+            if r > r0:
                 return np.zeros(3)  # TODO: Is this right?
-            l, m, n = self.get_nums(state)
+            l = state.l
+            m = state.m
             pl = self._p_l(l=l, mu=mu, nu=nu)
             tl = self._t_l(l=l, mu=mu, nu=nu)
             u = np.zeros(3, dtype=complex)
@@ -271,7 +270,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         to match with the normalized u return by `u`
         """
         def phifn(r):
-            l, m, n = self.get_nums(state)
+            l = state.l
             if r < self.R:
                 epsinf = self.eps_inf_in
             else:
@@ -288,7 +287,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         to match with the normalized u return by `u`
         """
         def phifn(r, theta, phi):
-            l, m, n = self.get_nums(state)
+            l, m = state.l, state.m
             return self.phi_rad(state)(r) * Y_lm(l, m)(theta, phi)
         return phifn
 
@@ -298,7 +297,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         equation (A10) of Roca
         """
         def gphifunc(r, theta, phi):
-            l, m, n = self.get_nums(state)
+            l, m = state.l, state.m
             basis = basis_roca(theta=theta, phi=phi, l=l, m=m)
             phi_r = self.Phi_ln(state)(r)
             phi_ang = Y_lm(l=l, m=m)(theta, phi)
@@ -325,25 +324,24 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         return pfunc
 
     # -- Root finding --
-    def nu_nl(self, state):
-        if state is self.vacuum_state():
-            return 0
-        l, m, n = self.get_nums(state)
-        if (l, n) in self._roots_nu:
-            return self._roots_nu[l, n]
+    def _root_dict_key(self, state):
+        return state.l, state.n
+
+    def nu(self, state):
+        k = self._root_dict_key(state)
+        if k in self._roots_nu:
+            return self._roots_nu[k]
         else:
             return None  # TODO
 
-    def mu_nl(self, state):
-        if state is self.vacuum_state():
-            return 0
-        l, m, n = self.get_nums(state)
-        if (l, n) in self._roots_mu:
-            return self._roots_mu[l, n]
+    def mu(self, state):
+        k = self._root_dict_key(state)
+        if k in self._roots_mu:
+            return self._roots_mu[k]
         else:
             return None  # TODO
 
-    def _nu(self, mu):
+    def _nu_from_mu(self, mu):
         mu = complex(mu)
         return np.sqrt(self._beta_div2 * mu ** 2 - self.R ** 2 * self.gamma)
 
@@ -358,7 +356,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
             return np.array([f, g])
 
         def fpr(mu):
-            nu = self._nu(mu=mu)
+            nu = self._nu_from_mu(mu=mu)
             return rootfn(np.array([mu, nu]))[0]
 
         fig, ax = plt.subplots(1, 1)
@@ -381,7 +379,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         ylog /= lin.norm(ylog, ord=2)
         ax.plot(xdat, ylog, '--', color='brown')
 
-        ypr = np.array([self._nu(x) for x in mudat])
+        ypr = np.array([self._nu_from_mu(x) for x in mudat])
         ypr /= lin.norm(ypr, ord=2)
 
         # Region of imaginary Q
@@ -426,7 +424,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         start, mu_roots = self._expected_roots_mu[l]
         for mu0, n in zip(mu_roots, range(start, self.num_n)):
             mu0 = complex(mu0)
-            nu0 = self._nu(mu=mu0)
+            nu0 = self._nu_from_mu(mu=mu0)
             yield np.array([mu0, nu0], dtype=complex), n
 
     def _get_root_func1(self, l, *args, **kwargs):
