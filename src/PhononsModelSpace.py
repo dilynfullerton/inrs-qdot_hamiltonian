@@ -35,7 +35,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         self.omega_T = omega_T
 
         # Derived physical constants
-        self.volume = 4 / 3 * pi * self.R ** 3
+        self.volume = 4 / 3 * pi * self.R**3
         self._eps_div = self.eps_inf_out / self.eps_inf_in
         self._beta_div2 = self.beta_L2 / self.beta_T2
         self.omega_L2 = self.omega_L**2
@@ -102,58 +102,34 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         omega2 = self.omega2(mu=mu, nu=nu)
         return np.sqrt(omega2)
 
-    def get_phi_rad(self, state):
-        return self.phi_rad_ln(state)
-
-    def get_phi_ang(self, state):
-        return self.phi_ang_lm(state)
-
-    def phi_rad_ln(self, state):
-        def hfunc(r):
-            l = state.l
-            return (
-                self.C_F * self.R / self.mu(state) *
-                (2 * l + 1) * 1j ** (l % 2) * np.sqrt(2*pi) *
-                self.Phi_ln(state)(r)
-            )
-        return hfunc
-
-    def phi_ang_lm(self, state):
-        l, m = state.l, state.m
-        return Y_lm(l=l, m=m)
-
     def Phi_ln(self, state):
-        """See Roca (43) and Riera (60)
+        """See Riera (60)
         """
-        def phifn(r, dr=0):
-            if state is self.vacuum_state():
-                return 0
+        # TODO: Figure out whether this equation is correct
+        # Note that for r > r0, there is a major difference between the
+        # expressions of Roca and that of Riera; the former depends on a
+        # difference of terms in the numerator while the latter depends on
+        # a sum. I believe Roca's expression is correct, but this should be
+        # verified.
+        def phifn(r):
             l = state.l
             mu_n = self.mu(state)
             ediv = self._eps_div
             dj_mu = _j(l, d=1)(mu_n)
             j_mu = _j(l)(mu_n)
             r0 = self.R
-            if dr == 0 and r <= r0:
-                return (
-                    -_j(l)(mu_n*r/r0) * (l + (l + 1) * ediv) +
-                    (mu_n * dj_mu + (l + 1) * ediv * j_mu) * (r/r0)**l
-                )
-            elif dr == 0:
-                return (mu_n * dj_mu - l * ediv * j_mu) * (r/r0)**(-l-1)
-            elif dr == 1 and r <= r0:
-                return (
-                    -mu_n/r0 * _j(l, d=1)(mu_n*r/r0) * (l + (l + 1) * ediv) +
-                    (mu_n * dj_mu + (l + 1) * ediv * j_mu) *
-                    l/r0 * (r/r0)**(l-1)
-                )
-            elif dr == 1:
-                return (
-                    (mu_n * dj_mu - l * ediv * j_mu) * (-l-1)/r0 *
-                    (r/r0)**(-l-2)
+            if r < r0:
+                return np.sqrt(self.R) / self._u_norm(state) * (
+                    _j(l)(mu_n*r/r0) -
+                    (mu_n * dj_mu + (l + 1) * ediv * j_mu) /
+                    (l + (l + 1) * ediv) * (r/r0)**l
                 )
             else:
-                return None  # TODO
+
+                return np.sqrt(self.R) / self._u_norm(state) * (
+                    (-mu_n * dj_mu + l * ediv * j_mu) / (l + (l + 1) * ediv) *
+                    (r/r0)**(-l-1)
+                )
         return phifn
 
     # -- States --
@@ -204,124 +180,40 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         muk = mu
         ediv = self._eps_div
         return (
-            self.gamma * (self.R / nu) ** 2 *
+            self.gamma * (self.R / nu)**2 *
             (muk * _j(l, d=1)(mu) + (l + 1) * ediv * _j(l)(mu)) /
             (l + ediv*(l+1))
         )
 
-    def _u_unnormalized(self, state):
-        r0 = self.R
-        mu, nu = self.mu(state), self.nu(state)
-
-        def ufunc(r, theta, phi):
-            if r > r0:
-                return np.zeros(3)  # TODO: Is this right?
-            l = state.l
-            m = state.m
-            pl = self._p_l(l=l, mu=mu, nu=nu)
-            tl = self._t_l(l=l, mu=mu, nu=nu)
-            u = np.zeros(3, dtype=complex)
-            basis = basis_roca(theta, phi, l=l, m=m)
-            ur = (
-                -mu/r0 * _j(l, d=1)(mu * r/r0) +
-                l*(l + 1)/r * pl * _g(l)(nu * r/r0) -
-                l * tl/r0 * (r/r0)**(l-1)
-            )
-            u += ur * Y_lm(l, m)(theta, phi) * basis[0]
-            if l == 0:
-                return u
-            u3 = -1j * np.sqrt(l*(l+1))/r * (
-                -_j(l)(mu * r/r0) +
-                pl * (_g(l)(nu * r/r0) + nu*r/r0 * _g(l, d=1)(nu * r/r0)) -
-                tl * (r/r0)**l
-            )
-            u += u3 * basis[2]
-            return u
-        return ufunc
-
     def _u_norm(self, state):
-        nums = self.get_nums(state)
-        if state is self.vacuum_state():
-            return 1
-        elif nums in self._u_norm_dict:
-            return self._u_norm_dict[nums]
+        """See Riera (64)
+        """
+        k = self._root_dict_key(state)
+        mu, nu = self.mu(state), self.nu(state)
+        r0 = self.R
+        l = state.l
+        jl = _j(l)
+        djl = _j(l, d=1)
+        gl = _g(l)
+        dgl = _g(l, d=1)
+        pl = self._p_l(l, mu=mu, nu=nu)
+        tl = self._t_l(l, mu=mu, nu=nu)
 
-        ufunc = self._u_unnormalized(state)
+        def int_norm2(r):
+            u_norm2 = abs(
+                -mu*r0 * djl(mu*r/r0) + l*(l+1)/r*pl*gl(nu*r/r0) -
+                tl*l/r0*(r/r0)**(l-1)
+            )**2
+            if l > 0:
+                u_norm2 += l*(l+1)/r**2 * abs(
+                    -jl(mu*r/r0) + pl/l *
+                    (gl(nu*r/r0) + nu*r/r0*dgl(nu*r/r0)) - tl*(r/r0)**l
+                )**2
+            return u_norm2 * r**2
 
-        def intfunc(r, theta, phi):
-            u = ufunc(r, theta, phi)
-            return lin.norm(u, ord=2)**2 * r**2 * np.sin(theta)
-        ans_real = integ.nquad(
-            intfunc, ranges=[(0, self.R), (0, np.pi), (0, 2 * np.pi)])[0]
-        self._u_norm_dict[nums] = np.sqrt(ans_real)
+        ans = integ.quad(int_norm2, 0, r0)[0]
+        self._u_norm_dict[k] = np.sqrt(ans)
         return self._u_norm(state=state)
-
-    def u(self, state):
-        def ufunc(r, theta, phi):
-            return (
-                self._u_unnormalized(state)(r, theta, phi) /
-                self._u_norm(state)
-            )
-        return ufunc
-
-    # TODO: Check correctness
-    def phi_rad(self, state):
-        """Returns the phi function with the proper normalization so as
-        to match with the normalized u return by `u`
-        """
-        def phifn(r):
-            l = state.l
-            if r < self.R:
-                epsinf = self.eps_inf_in
-            else:
-                epsinf = self.eps_inf_out
-            return (
-                4 * np.pi * self.alpha / epsinf /
-                (l + (l + 1) * self._eps_div) / self._u_norm(state) *
-                self.Phi_ln(state)(r)
-            )
-        return phifn
-
-    def phi(self, state):
-        """Returns the phi function with the proper normalization so as
-        to match with the normalized u return by `u`
-        """
-        def phifn(r, theta, phi):
-            l, m = state.l, state.m
-            return self.phi_rad(state)(r) * Y_lm(l, m)(theta, phi)
-        return phifn
-
-    def grad_phi(self, state):
-        """Returns the gradient of phi as a function of spatial coordinates
-        (r, theat, phi). To take the gradient, we use the handy
-        equation (A10) of Roca
-        """
-        def gphifunc(r, theta, phi):
-            l, m = state.l, state.m
-            basis = basis_roca(theta=theta, phi=phi, l=l, m=m)
-            phi_r = self.Phi_ln(state)(r)
-            phi_ang = Y_lm(l=l, m=m)(theta, phi)
-            grad_phi_r = self.Phi_ln(state)(r, dr=1) * basis[0]
-            grad_phi_ang = -1j/r * np.sqrt(l*(l+1)) * basis[2]
-            return phi_r * grad_phi_ang + phi_ang * grad_phi_r
-        return gphifunc
-
-    # TODO: Check correctness
-    def P(self, state):
-        """Returns a function of spatial coordinates (r, theta, phi) which
-        gives the polarization vector defined in Roca (4)
-        """
-        def pfunc(r, theta, phi):
-            if r < self.R:
-                epsinf = self.eps_inf_in
-            else:
-                epsinf = self.eps_inf_out
-            return (
-                self.alpha * self.u(state)(r, theta, phi) -
-                (epsinf - 1)/np.pi/4 *
-                self.grad_phi(state)(r, theta, phi)
-            )
-        return pfunc
 
     # -- Root finding --
     def _root_dict_key(self, state):
