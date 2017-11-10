@@ -168,7 +168,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
     def meff_in(self, band):
         return self._mu_in[band]
 
-    def mu_out(self, band):
+    def meff_out(self, band):
         return self._mu_out[band]
 
     def _A_B(self, state):
@@ -199,8 +199,8 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
     def _get_y_from_x(self, x, band):
         x = complex(x)
         return np.sqrt(
-            2 * self.mu_out(band) * self.r_0 ** 2 * self.V_eff(band) -
-            self.mu_out(band) / self.meff_in(band) * x**2
+            2 * self.meff_out(band) * self.r_0 ** 2 * self.V_eff(band) -
+            self.meff_out(band) / self.meff_in(band) * x ** 2
         )
 
     def plot_root_fn_x(self, l, j, xdat, show=True):
@@ -269,13 +269,13 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
             ky = k_sph(l)(y)
             djx = j_sph(l, d=1)(x)
             dky = k_sph(l, d=1)(y)
-            ans = self.mu_out(j) * x * djx * ky - self.meff_in(j) * y * dky * jx
+            ans = self.meff_out(j) * x * djx * ky - self.meff_in(j) * y * dky * jx
             return ans
         return rf1
 
     def _get_root_func2(self, j, *args, **kwargs):
         def rf2(x, y):
-            mu0 = self.mu_out(j)
+            mu0 = self.meff_out(j)
             mui = self.meff_in(j)
             vj = self.V_eff(j)
             r0 = self.r_0
