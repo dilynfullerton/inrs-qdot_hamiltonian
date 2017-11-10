@@ -7,9 +7,16 @@ from scipy import linalg
 from helper_functions import Y_lm, j_sph, k_sph
 from root_solver_2d import RootSolverComplex2d
 from ModelSpace import ModelSpace
+from collections import namedtuple
+
+
+ExitonMode = namedtuple('ExitonMode', ['band', 'l', 'm', 'n'])
 
 
 class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
+    BAND_VAL = 0
+    BAND_COND = 1
+
     def __init__(
             self, nmax, lmax,
             r_0, V_v, V_c, me_eff_in, mh_eff_in, me_eff_out, mh_eff_out,
@@ -41,8 +48,8 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         self.r_0 = r_0
 
         # Root finding
-        self._x = dict()  # l, n, band -> x
-        self._y = dict()  # l, n, band -> y
+        self._roots_x = dict()  # l, n, band -> x
+        self._roots_y = dict()  # l, n, band -> y
         self._expected_roots_x = expected_roots_x_lj  # l, band -> x0
         self._fill_roots_xy()
 
@@ -56,7 +63,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
             for l in range(self.num_l):
                 for m in range(-l, l+1):
                     for n in range(self.num_n):
-                        yield (band, l, m, n)
+                        yield ExitonMode(band=band, l=l, m=m, n=n)
 
     def states(self):
         """Returns an iterator for the set of basis states for which
@@ -65,6 +72,16 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         for state in self.modes():
             if self.x(state) is not None:
                 yield state
+
+    def electron_states(self):
+        for s in self.states():
+            if s.band == ExitonModelSpace.BAND_COND:
+                yield s
+
+    def hole_states(self):
+        for s in self.states():
+            if s.band == ExitonModelSpace.BAND_VAL:
+                yield s
 
     def destroy(self, mode):
         """Returns a destruction operator for the given mode
@@ -84,25 +101,26 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         return self.create(mode=mode) * self.vacuum_ket()
 
     def get_omega(self, state):
+        """Returns the frequency associated with the first exitation of the
+        given single-particle mode
+        """
         # TODO: verify
-        band, l, m, n = self.get_nums(state)
-        mu_in = self.mu_in(band)
-        e = 1/2 / mu_in * self.x(state)**2 / self.r_0**2
-        return complex(e).real
+        mu_in = self.meff_in(state.band)
+        e = 1/2 / mu_in * self.x(state) ** 2 / self.r_0 ** 2
+        return e
 
     # -- States --
     def iter_x_n(self, l, band):
         for state in self.states():
-            band0, l0, m0, n0 = self.get_nums(state)
-            if band0 == band and l0 == l and m0 == 0:
-                yield self.x(state), n0
+            if state.band == band and state.l == l and state.m == 0:
+                yield self.x(state), state.n
 
     # -- Wavefunction --
     def _Psi_rad_unnormalized_lnj(self, state):
         A, B = self._A_B(state)
         x = self.x(state)
         y = self.y(state)
-        band, l, m, n = self.get_nums(state)
+        l = state.l
 
         def psifn(r, d_r=0):
             if r <= self.r_0:
@@ -127,8 +145,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         return psifn
 
     def wavefunction_envelope_angular(self, state):
-        band, l, n, m = self.get_nums(state)
-        return Y_lm(l=l, m=m)
+        return Y_lm(l=state.l, m=state.m)
 
     def wavefunction_envelope(self, state):
         def psifn(r, theta, phi):
@@ -148,7 +165,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
     def V_eff(self, band):
         return self._Veff[band]
 
-    def mu_in(self, band):
+    def meff_in(self, band):
         return self._mu_in[band]
 
     def mu_out(self, band):
@@ -157,33 +174,33 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
     def _A_B(self, state):
         """I have redefined these to be unnormalized coefficients
         """
-        band, l, m, n = self.get_nums(state)
-        jln = j_sph(l=l)(self.x(state))
-        kln = k_sph(l=l)(self.y(state))
+        jln = j_sph(l=state.l)(self.x(state))
+        kln = k_sph(l=state.l)(self.y(state))
         return kln, jln
 
     # -- Obtaining roots --
+    def _root_dict_key(self, state):
+        return state.l, state.n, state.band
+
     def x(self, state):
-        band, l, m, n = self.get_nums(state)
-        nums = l, n, band
-        if nums in self._x:
-            return self._x[nums]
+        k = self._root_dict_key(state)
+        if k in self._roots_x:
+            return self._roots_x[k]
         else:
             return None  # TODO
 
     def y(self, state):
-        band, l, m, n = self.get_nums(state)
-        nums = l, n, band
-        if nums in self._y:
-            return self._y[nums]
+        k = self._root_dict_key(state)
+        if k in self._roots_y:
+            return self._roots_y[k]
         else:
             return None  # TODO
 
-    def _get_y(self, x, band):
+    def _get_y_from_x(self, x, band):
         x = complex(x)
         return np.sqrt(
-            2 * self.mu_out(band) * self.r_0**2 * self.V_eff(band) -
-            self.mu_out(band) / self.mu_in(band) * x**2
+            2 * self.mu_out(band) * self.r_0 ** 2 * self.V_eff(band) -
+            self.mu_out(band) / self.meff_in(band) * x**2
         )
 
     def plot_root_fn_x(self, l, j, xdat, show=True):
@@ -191,7 +208,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
 
         def fpr(x):
             x = complex(x)
-            y = self._get_y(x=x, band=j)
+            y = self._get_y_from_x(x=x, band=j)
             result = fn(np.array([x, y]))[0]
             return np.real(result)
 
@@ -210,7 +227,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         ylog /= linalg.norm(ylog, ord=2)
         ax.plot(xdat, ylog, '--', color='red')
 
-        ypr = np.real(np.sqrt([self._get_y(x=x, band=j) for x in xdat]))
+        ypr = np.real(np.sqrt([self._get_y_from_x(x=x, band=j) for x in xdat]))
         ypr /= linalg.norm(ypr, ord=2)
         lineb, = ax.plot(xdat, ypr, '-', color='blue')
         ax.plot(xdat, -ypr, '-', color='blue')
@@ -234,14 +251,14 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
                 x, y = root
                 assert not np.isnan(x)  # TODO
                 assert not np.isnan(y)  # TODO
-                self._x[l, n, j] = x
-                self._y[l, n, j] = y
+                self._roots_x[l, n, j] = x
+                self._roots_y[l, n, j] = y
 
     def _get_expected_roots_xy(self, j, l, *args, **kwargs):
         start, roots_x = self._expected_roots_x[l, j]
         for x0, n in zip(roots_x, range(start, self.num_n)):
             x0 = complex(x0)
-            y0 = self._get_y(x=x0, band=j)
+            y0 = self._get_y_from_x(x=x0, band=j)
             yield np.array([x0, y0], dtype=complex), n
 
     def _get_root_func1(self, j, l, *args, **kwargs):
@@ -252,14 +269,14 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
             ky = k_sph(l)(y)
             djx = j_sph(l, d=1)(x)
             dky = k_sph(l, d=1)(y)
-            ans = self.mu_out(j) * x * djx * ky - self.mu_in(j) * y * dky * jx
+            ans = self.mu_out(j) * x * djx * ky - self.meff_in(j) * y * dky * jx
             return ans
         return rf1
 
     def _get_root_func2(self, j, *args, **kwargs):
         def rf2(x, y):
             mu0 = self.mu_out(j)
-            mui = self.mu_in(j)
+            mui = self.meff_in(j)
             vj = self.V_eff(j)
             r0 = self.r_0
             ans = mui * y**2 + mu0 * x**2 - 2 * mu0 * mui * r0**2 * vj
