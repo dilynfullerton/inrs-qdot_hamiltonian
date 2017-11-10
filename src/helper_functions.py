@@ -98,9 +98,9 @@ def basis_cartesian():
 
 def basis_pmz():
     isq2 = 1/np.sqrt(2)
-    return np.array([[isq2,  1j*isq2, 0],
-                     [isq2, -1j*isq2, 0],
-                     [0,     0,       1]])
+    return np.array([[isq2,    isq2,     0],
+                     [1j*isq2, -1j*isq2, 0],
+                     [0,       0,        1]])
 
 
 def basis_spherical(theta, phi):
@@ -113,9 +113,23 @@ def basis_spherical(theta, phi):
     yth = zr * -xph
     xr = -zth * yph
     yr = -zth * -xph
-    return np.array([[xr, xth, xph],
-                     [yr, yth, yph],
-                     [zr, zth, zph]])
+    return np.array([[xr,  yr,  zr],
+                     [xth, yth, zth],
+                     [xph, yph, zph]])
+
+
+def basis_roca(theta, phi, l, m):
+    er, eth, eph = basis_spherical(theta, phi)
+    if l == 0:
+        xlm = np.zeros_like(er)
+    else:
+        xlm = m*(2*l+1)/l/(l+1) * 1j * Y_lm(l, m)(theta, phi) * eth
+        xlm += -(l-m+1)/(l+1) * Y_lm(l+1, m)(theta, phi) * eph
+        if m != -l:
+            xlm += (l+m)/l * Y_lm(l-1, m)(theta, phi) * eph
+        xlm *= np.sqrt(l * (l + 1)) / (2 * l + 1) / np.sin(theta)
+    er_xlm = np.cross(er, xlm)
+    return np.vstack((er, xlm, er_xlm))
 
 
 def threej(j1, j2, j, m1, m2, m):
