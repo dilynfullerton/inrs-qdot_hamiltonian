@@ -119,17 +119,18 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
             j_mu = _j(l)(mu_n)
             r0 = self.R
             if r < r0:
-                return np.sqrt(self.R) / self._u_norm(state) * (
+                phi = np.sqrt(self.R) / self._u_norm(state) * (
                     _j(l)(mu_n*r/r0) -
                     (mu_n * dj_mu + (l + 1) * ediv * j_mu) /
                     (l + (l + 1) * ediv) * (r/r0)**l
                 )
             else:
 
-                return np.sqrt(self.R) / self._u_norm(state) * (
+                phi = np.sqrt(self.R) / self._u_norm(state) * (
                     (-mu_n * dj_mu + l * ediv * j_mu) / (l + (l + 1) * ediv) *
                     (r/r0)**(-l-1)
                 )
+            return complex(phi).real  # TODO
         return phifn
 
     # -- States --
@@ -189,6 +190,9 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         """See Riera (64)
         """
         k = self._root_dict_key(state)
+        if k in self._u_norm_dict:
+            return self._u_norm_dict[k]
+
         mu, nu = self.mu(state), self.nu(state)
         r0 = self.R
         l = state.l
@@ -252,8 +256,12 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
             return rootfn(np.array([mu, nu]))[0]
 
         fig, ax = plt.subplots(1, 1)
+
+        # Plot axes
         ax.axhline(0, color='gray', lw=1, alpha=.5)
         ax.axvline(0, color='gray', lw=1, alpha=.5)
+
+        # Plot high_mu boundaries
         ax.axvline(self.high_mu, ls='-', color='black', lw=1, alpha=.5)
         ax.axvline(-self.high_mu, ls='-', color='black', lw=1, alpha=.5)
 
@@ -262,17 +270,16 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         mudat = np.concatenate((mudat_m, mudat_p))
         mudat.sort()
 
+        # Plot real and imaginary parts of the root function
         ydat = np.array([fpr(x) for x in mudat])
         ydat /= lin.norm(ydat, ord=2)
-        liner, = ax.plot(xdat, np.real(ydat), '-', color='red')
         linei, = ax.plot(xdat, np.imag(ydat), '-', color='blue')
+        liner, = ax.plot(xdat, np.real(ydat), '-', color='red')
 
+        # Plot log function to aid in identifying roots
         ylog = np.log(np.abs(ydat))
         ylog /= lin.norm(ylog, ord=2)
         ax.plot(xdat, ylog, '--', color='brown')
-
-        ypr = np.array([self._nu_from_mu(x) for x in mudat])
-        ypr /= lin.norm(ypr, ord=2)
 
         # Region of imaginary Q
         x_min_imQ = max(min(xdat), -self.high_mu)
@@ -285,13 +292,11 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         span_reQ = ax.axvspan(x_min_reQ, x_max_reQ, color='red', alpha=.3)
         ax.axvspan(-x_max_reQ, -x_min_reQ, color='red', alpha=.3)
 
+        # Roots
         for mu, n in self.iter_mu_n(l=l):
-            if n < 0:
-                pltzero = mu.real
-            else:
-                pltzero = mu.real
-            ax.axvline(pltzero, ls='--', color='green', lw=1, alpha=.5)
+            ax.axvline(mu.real, ls='--', color='green', lw=1, alpha=.5)
 
+        # Title and legend
         ax.set_title('Phonon root function for l = {}'.format(l))
         ax.legend(
             (liner, linei, span_imQ, span_reQ),
