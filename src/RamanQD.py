@@ -7,10 +7,7 @@ import itertools as it
 import numpy as np
 from scipy import integrate as integ
 from helper_functions import basis_pmz, threej
-from root_solver_2d import RootSolverComplex2d
 from ExitonModelSpace import ExitonModelSpace
-
-__all__ = ['ModelSpaceElectronHolePair', 'RamanQD']
 
 
 def Lambda(lbj, mbj, lcj, mcj, la, ma):
@@ -20,28 +17,6 @@ def Lambda(lbj, mbj, lcj, mcj, la, ma):
         threej(lbj, la, lcj, -mbj, ma, mcj) *
         threej(lbj, la, lcj, 0, 0, 0)
     )
-
-
-def Pi(j, p, laj, maj):
-    if j == 1 and p == 1:
-        return -np.sqrt(
-            (laj + maj + 2) * (laj + maj + 1) /
-            2 / (2 * laj + 1) / (2 * laj + 3)
-        )
-    elif j == 1 and p == 2:
-        return -Pi(j=1, p=1, laj=laj, maj=-maj)
-    elif j == 1 and p == 3:
-        return np.sqrt(
-            (laj - maj + 1) * (laj + maj + 1) / (2 * laj + 1) / (2 * laj + 3)
-        )
-    elif j == 2 and p == 1:
-        return -Pi(j=1, p=1, laj=laj-1, maj=-maj-1)
-    elif j == 2 and p == 2:
-        return -Pi(j=2, p=1, laj=laj, maj=-maj)
-    elif j == 2 and p == 3:
-        return Pi(j=1, p=3, laj=laj-1, maj=maj)
-    else:
-        raise RuntimeError
 
 
 class RamanQD:
@@ -92,11 +67,15 @@ class RamanQD:
                 self.ex_space.electron_states(),
                 self.ex_space.hole_states()
         ):
+            print('Computing matrix elements for states:')
+            print('  phonon:    {}'.format(state_ph))
+            print('  electron:  {}'.format(state_e))
+            print('  hole:      {}'.format(state_h))
             omega_ph = self.ph_space.get_omega(state_ph)
             G2 = self.G2(
                 omega_l=omega_l, omega_s=omega_s, omega_ph=omega_ph,
                 xa1=self.ex_space.x(state_e),
-                xa2=self.ex_space.x(state_ph)
+                xa2=self.ex_space.x(state_h)
             )
             t2 = self.S(p=p, e_s=e_s) / (G2**2 + self.delta_f**2)
 
@@ -198,11 +177,11 @@ class RamanQD:
             # Get first numerator and second denominator
             beta = self.beta(transition_band)
             if lbj == laj + 1:
-                first_numerator = beta * Pi(
+                first_numerator = beta * self.Pi(
                     transition_band, 1, laj=laj, maj=maj
                 )
             elif lbj == laj - 1:
-                first_numerator = beta * Pi(
+                first_numerator = beta * self.Pi(
                     transition_band, 2, laj=laj, maj=maj
                 )
             else:
@@ -289,6 +268,28 @@ class RamanQD:
         """
         return self.meff_reduced / self.ex_space.meff_in(band=j)
 
+    def Pi(self, j, p, laj, maj):
+        if j == ExitonModelSpace.BAND_COND and p == 1:
+            return -np.sqrt(
+                (laj + maj + 2) * (laj + maj + 1) /
+                2 / (2 * laj + 1) / (2 * laj + 3)
+            )
+        elif j == ExitonModelSpace.BAND_COND and p == 2:
+            return -self.Pi(j=j, p=1, laj=laj, maj=-maj)
+        elif j == ExitonModelSpace.BAND_COND and p == 3:
+            return np.sqrt(
+                (laj - maj + 1) * (laj + maj + 1) / (2 * laj + 1) /
+                (2 * laj + 3)
+            )
+        elif p == 1:
+            return -self.Pi(j=ExitonModelSpace.BAND_COND,
+                            p=1, laj=laj-1, maj=-maj-1)
+        elif p == 2:
+            return -self.Pi(j=j, p=1, laj=laj, maj=-maj)
+        elif p == 3:
+            return self.Pi(j=ExitonModelSpace.BAND_COND,
+                           p=3, laj=laj-1, maj=maj)
+
     # -- Matrix element integrals --
     def _key_I(self, state_b, state_a):
         return (
@@ -302,9 +303,10 @@ class RamanQD:
         R_ln^dag R_ln from r = 0 to r = inf
         """
         k = self._key_I(state_b, state_a)
-        if k in self._I_dict:
+        if state_b > state_a:
+            return np.conj(self.I(state_a, state_b))
+        elif k in self._I_dict:
             return self._I_dict[k]
-
         psia = self.ex_space.wavefunction_envelope_radial(state_a)
         psib = self.ex_space.wavefunction_envelope_radial(state_b)
 
@@ -318,8 +320,8 @@ class RamanQD:
         return self.I(state_b=state_b, state_a=state_a)
 
     def _key_II(self, state_b, state_c, state_ph):
-        return (state_b.j, state_b.l, state_b.n,
-                state_c.j, state_c.l, state_c.n,
+        return (state_b.band, state_b.l, state_b.n,
+                state_c.band, state_c.l, state_c.n,
                 state_ph.l, state_ph.n)
 
     def II(self, state_b, state_c, state_ph):
@@ -327,12 +329,13 @@ class RamanQD:
         'x', but I don't think that is correct.
 
         Returns the radial part of the matrix element
-        < nb lb mb | H_ph_na,la,ma | nc lb mb >
+        < nb lb mb | H_ph_na,la,ma | nc lc mc >
         """
         k = self._key_II(state_b, state_c, state_ph=state_ph)
-        if k in self._II_dict:
+        if state_b > state_c:
+            return np.conj(self.II(state_c, state_b, state_ph))
+        elif k in self._II_dict:
             return self._II_dict[k]
-
         Phi_ln = self.ph_space.Phi_ln(state_ph)
         psib = self.ex_space.wavefunction_envelope_radial(state_b)
         psic = self.ex_space.wavefunction_envelope_radial(state_c)
