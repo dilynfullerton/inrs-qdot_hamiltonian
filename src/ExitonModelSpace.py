@@ -20,17 +20,22 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
     def __init__(
             self, nmax, lmax,
             radius, V_v, V_c, me_eff_in, mh_eff_in, me_eff_out, mh_eff_out,
-            expected_roots_x_elec, expected_roots_x_hole,
+            free_electron_mass, expected_roots_x_elec, expected_roots_x_hole,
     ):
         """
         :param V_v: Effective potential (?) of the valence band
         :param V_c: Effective potential (?) of the conduction band
-        :param me_eff_in: Effective electron mass in nanostructures
-        :param mh_eff_in: Effective hole mass in nanostructures
-        :param me_eff_out: Free electron mass
-        :param mh_eff_out: Free hole mass
+        :param me_eff_in: Effective electron mass in nanostructure,
+        relative to the free electron mass
+        :param mh_eff_in: Effective hole mass in nanostructure,
+        relative to the free electron mass
+        :param me_eff_out: Effective electron mass outside of the
+        nanostructure, relative to the free electron mass
+        :param mh_eff_out: Effective hole mass outside of the
+        nanostructure, relative to the free electron mass
         ordered list of expected x_lnj, where j is 1 (electron) or 2 (hole)
         include in calcuations
+        :param free_electron_mass: Mass of a free electron
         """
         # Model space constants
         self.nmax = nmax
@@ -45,6 +50,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         self._me_eff_out = me_eff_out
         self._mh_eff_in = mh_eff_in
         self._mh_eff_out = mh_eff_out
+        self.free_electron_mass = free_electron_mass
 
         # Derived/inherited physical constants
         self.r_0 = radius
@@ -98,7 +104,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         return qt.tensor(ops)
 
     def get_nums(self, mode):
-        return mode
+        return mode.band, mode.l, mode.m, mode.n
 
     def get_ket(self, mode):
         return self.create(mode=mode) * self.vacuum_ket()
@@ -120,17 +126,16 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
 
     # -- Wavefunction --
     def _Psi_rad_unnormalized_lnj(self, state):
-        A, B = self._A_B(state)
         x = self.x(state)
         y = self.y(state)
         l = state.l
         r0 = self.r_0
 
         def psifn(r, d_r=0):
-            if r <= r0:
-                return A/np.sqrt(r) * J(l+1/2, d=d_r)(x*r/r0) * (x/r0)**d_r
+            if r < r0:
+                return k_sph(l)(y) * j_sph(l, d=d_r)(x*r/r0) * (x/r0)**d_r
             else:
-                return B/np.sqrt(r) * K(l+1/2, d=d_r)(y*r/r0) * (y/r0)**d_r
+                return j_sph(l)(x) * k_sph(l, d=d_r)(y*r/r0) * (y/r0)**d_r
         return psifn
 
     def _Psi_rad_norm_key(self, state):
@@ -192,12 +197,12 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         else:
             return self._mh_eff_out
 
-    def _A_B(self, state):
-        """I have redefined these to be unnormalized coefficients
-        """
-        jln = J(l=state.l+1/2)(self.x(state))
-        kln = K(l=state.l+1/2)(self.y(state))
-        return kln, jln
+    # def _A_B(self, state):
+    #     """I have redefined these to be unnormalized coefficients
+    #     """
+    #     jln = J(l=state.l+1/2)(self.x(state))
+    #     kln = K(l=state.l+1/2)(self.y(state))
+    #     return kln, jln
 
     # -- Obtaining roots --
     def _root_dict_key(self, state):
@@ -220,12 +225,15 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
     def _get_y_from_x(self, x, band):
         x = complex(x)
         return np.sqrt(
-            2 * self.meff_out(band) * self.r_0**2 * self.V_eff(band) -
-            self.meff_out(band) / self.meff_in(band) * x**2
+            2 * self.meff_out(band) *
+            self.free_electron_mass * self.r_0**2 * self.V_eff(band) -
+            (self.meff_out(band) / self.meff_in(band)) * x**2
         )
 
     def _high_x(self, band):
-        return self.r_0 * np.sqrt(2 * self.meff_in(band) * self.V_eff(band))
+        return self.r_0 * np.sqrt(
+            2 * self.meff_in(band) * self.free_electron_mass * self.V_eff(band)
+        )
 
     def plot_root_fn_electrons(self, l, xdat, show=True):
         return self.plot_root_fn_x(l=l, xdat=xdat, show=show,
@@ -263,7 +271,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         ydat /= linalg.norm(ydat, ord=2)
         linei, = ax.plot(xdat, np.imag(ydat), '-', color='blue')
         liner, = ax.plot(xdat, np.real(ydat), '-', color='red')
-
+        ax.plot(xdat, np.abs(ydat), '-', color='purple')
         # Plot log function to aid in identifying roots
         ylog = np.log(np.abs(ydat))
         ylog /= linalg.norm(ylog, ord=2)
@@ -335,11 +343,11 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         """Re-expressed this in terms of spherical Bessel functions
         """
         def rf1(x, y):
-            jx = J(l+1/2)(x)
-            ky = K(l+1/2)(y)
-            djx = J(l+1/2, d=1)(x)
-            dky = K(l+1/2, d=1)(y)
-            ans = self.meff_out(j)*x*djx*ky - self.meff_in(j)*y*dky*jx
+            jx = j_sph(l)(x)
+            ky = k_sph(l)(y)
+            djx = j_sph(l, d=1)(x)
+            dky = k_sph(l, d=1)(y)
+            ans = x*djx*ky - (self.meff_in(j)/self.meff_out(j))*y*dky*jx
             return ans
         return rf1
 
@@ -349,6 +357,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
             mui = self.meff_in(j)
             vj = self.V_eff(j)
             r0 = self.r_0
-            ans = mui * y**2 + mu0 * x**2 - 2 * mu0 * mui * r0**2 * vj
+            m0 = self.free_electron_mass
+            ans = y**2*(mui/mu0) + x**2 - 2 * mui * m0 * r0**2 * vj
             return ans
         return rf2

@@ -2,60 +2,68 @@ import numpy as np
 from PhononsModelSpace import PhononModelSpace
 from ExitonModelSpace import ExitonModelSpace
 from RamanQD import RamanQD
+from matplotlib import pyplot as plt
+from os import path
+import time
+import pickle
+from collections import deque
 # import warnings
 # warnings.filterwarnings('error')
 
-RADIUS = 2e-7  # [cm]
+RADIUS = 2  # [nm]
 
 # Phonon parameters
-NMAX_PHONON = 2
+NMAX_PHONON = 9
 LMAX_PHONON = 1
 OMEGA_L = 305  # [cm-1]
 OMEGA_T = 238  # [cm-1]
-BETA_L = 5.04e-6  # [1]
-BETA_T = 1.58e-6  # [1]
+BETA_L = 5.04e1  # [nm/cm]
+BETA_T = 1.58e1  # [nm/cm]
 EPS_INF_IN = 5.72
 EPS_INF_OUT = 4.64
 XDAT_MU = np.linspace(1e-6, 10, 10000)
 EXPECTED_ROOTS_PHONON = {
-    0: (0, [1.65, 4.04, 4.50]),
-    1: (0, [3.18, 4.80, 5.26]),
+    0: (0, [0.01, 1.65, 4.04, 4.50, 5.29, 6.14, 6.74, 7.16, 7.42, 7.55]),
+    1: (0, [0.01, 3.18, 4.80, 5.26, 5.78, 6.48, 6.63, 7.01, 7.35, 7.57]),
 }
 
 # Exiton parameters
-NMAX_EXITON = 2
+NMAX_EXITON = 5
 LMAX_EXITON = 1
-V0_VAL = 1.5324e4  * 1e4  # [cm-1]
-V0_COND = 2.0164e4 * 1e4  # [cm-1]
-MASS_E_IN = .18  * 4.12e9
-MASS_H_IN = .51  * 4.12e9
-MASS_E_OUT = 1  * 4.12e9
-MASS_H_OUT = 1  * 4.12e9
-XDAT_X = np.linspace(1e-10, 20, 10000)
+V0_VAL = 1.5324e4 * 1e2  # [cm-1]
+V0_COND = 2.0164e4 * 1e2  # [cm-1]
+MASS_E_IN = .18
+MASS_H_IN = .51
+MASS_E_OUT = 1
+MASS_H_OUT = 1
+FREE_ELECTRON_MASS = 412.149e-7  # [cm/nm^2]
+XDAT_X = np.linspace(1e-10, 15, 20000)
 EXPECTED_ROOTS_ELECTRONS = {
-    0: (0, [3.1, 6.1, 9.2]),
-    1: (0, [4.4, 7.6, 10.8])
+    0: (0, [2.53943, 5.26517, 8.1282, 10.9340]),
+    1: (0, [3.67152, 6.55451, 9.478265])
 }
 EXPECTED_ROOTS_HOLES = {
-    0: (0, [3.1, 6.1, 9.2]),
-    1: (0, [4.40, 7.66, 10.81])
+    0: (0, [2.88065, 5.7688, 8.6669894, 11.5682, 14.44034]),
+    1: (0, [4.12112, 7.09644, 10.0319, 12.94567])
 }
 
 # Raman parameters
-E_GAP = 2.097e4 * 1e4
-GAMMA_A = 8.06554  # [cm-1]
-GAMMA_B = GAMMA_A
-GAMMA_F = 3 * GAMMA_A
+E_GAP = 2.097e4 * 1e2  # [cm-1]
+# E_GAP = 0
+# GAMMA_A = 8.06554  # [cm-1]
+# GAMMA_B = GAMMA_A
+# GAMMA_F = 3 * GAMMA_A
+GAMMA_A = 1
+GAMMA_B = 1
+GAMMA_F = 1
 
-OMEGA_LASER = 1000  # [cm-1]
-OMEGA_SEC = 100  # [cm-1]
+# OMEGA_LASER = 1000  # [cm-1]
+OMEGA_LASER = 1e7
+OMEGA_SEC = 250  # [cm-1]
 POLAR_LASER = [1., 0., 0.]
 POLAR_SEC = [1., 0., 0.]
 REFRACTION_IDX_LASER = 1
 REFRACTION_IDX_SEC = 1
-
-
-# Roots
 
 
 # Get phonon space
@@ -66,6 +74,19 @@ phonon_space = PhononModelSpace(
     epsilon_inf_qdot=EPS_INF_IN, epsilon_inf_env=EPS_INF_OUT,
     expected_roots_mu_l=EXPECTED_ROOTS_PHONON,
 )
+
+for s in phonon_space.states():
+    print(s, end='\t')
+    print(phonon_space.get_omega(s))
+
+# fig, ax = plt.subplots(1, 1)
+# for s in phonon_space.states():
+#     func = phonon_space.Phi_ln(s)
+#     xdat = np.linspace(0, 2 * phonon_space.R, 1000)
+#     ydat = np.array([func(x) for x in xdat])
+#     ax.plot(xdat, ydat, '-', label=phonon_space.get_nums(s))
+# plt.legend()
+# plt.show()
 
 # Plot roots for phonon potential
 # phonon_space.plot_root_function_mu(l=0, xdat=XDAT_MU, show=True)
@@ -82,9 +103,27 @@ exiton_space = ExitonModelSpace(
     me_eff_out=MASS_E_OUT,
     mh_eff_in=MASS_H_IN,
     mh_eff_out=MASS_H_OUT,
+    free_electron_mass=FREE_ELECTRON_MASS,
     expected_roots_x_elec=EXPECTED_ROOTS_ELECTRONS,
     expected_roots_x_hole=EXPECTED_ROOTS_HOLES,
 )
+
+# fig, ax = plt.subplots(1, 1)
+# for s in exiton_space.states():
+#     func = exiton_space.wavefunction_envelope_radial(state=s)
+#     xdat = np.linspace(.00001 * phonon_space.R, 2 * phonon_space.R, 1000)
+#     ydat = np.array([func(x) for x in xdat])
+#     ax.plot(xdat, ydat, '-', label=exiton_space.get_nums(s))
+# plt.legend()
+# plt.show()
+# fig, ax = plt.subplots(1, 1)
+# for s in exiton_space.states():
+#     func = exiton_space.wavefunction_envelope_radial(state=s)
+#     xdat = np.linspace(.00001 * phonon_space.R, 2 * phonon_space.R, 1000)
+#     ydat2 = np.array([func(x, 1) for x in xdat])
+#     ax.plot(xdat, ydat2, '-', label=exiton_space.get_nums(s))
+# plt.legend()
+# plt.show()
 
 # Plots roots: Electrons
 # exiton_space.plot_root_fn_electrons(l=0, xdat=XDAT_X, show=True)
@@ -94,18 +133,68 @@ exiton_space = ExitonModelSpace(
 # exiton_space.plot_root_fn_holes(l=0, xdat=XDAT_X, show=True)
 # exiton_space.plot_root_fn_holes(l=1, xdat=XDAT_X, show=True)
 
-
 # Make system Hamiltonian
-ham = RamanQD(
-    Gamma_a=GAMMA_A,
-    Gamma_b=GAMMA_B,
-    Gamma_f=GAMMA_F,
-    phonon_space=phonon_space,
-    exiton_space=exiton_space,
-    E_gap=E_GAP,
-)
-
-print(
+SAVENAME = 'savedham'
+if not path.exists(SAVENAME):
+    ham = RamanQD(
+        phonon_space=phonon_space,
+        exiton_space=exiton_space,
+    )
     ham.differential_raman_efficiency(
-        omega_l=OMEGA_LASER, e_l=POLAR_LASER, omega_s=OMEGA_SEC, e_s=POLAR_SEC)
-)
+        omega_l=OMEGA_LASER, e_l=POLAR_LASER, omega_s=OMEGA_SEC, e_s=POLAR_SEC,
+        Gamma_a=GAMMA_A, Gamma_b=GAMMA_B, Gamma_f=GAMMA_F, E_gap=E_GAP
+    )
+    with open(SAVENAME, 'wb') as fwb:
+        pickle.dump(ham, fwb)
+else:
+    with open(SAVENAME, 'rb') as frb:
+        ham = pickle.load(frb)
+
+# domega = OMEGA_L - OMEGA_T
+# xdat = np.linspace(OMEGA_T-domega/10, OMEGA_L+domega/10, 100)
+# xdat = np.linspace(0, OMEGA_LASER, 100)
+# ydatr = np.zeros_like(xdat)
+# ydati = np.zeros_like(xdat)
+
+plt.ion()
+fig, ax = plt.subplots(1, 1)
+xdat = []
+ydatr = []
+# ydati = []
+liner, = ax.plot(xdat, ydatr, '-', color='red')
+# linei, = ax.plot(xdat, ydati, '-', color='blue')
+
+# for i, x in enumerate(xdat):
+
+todo = deque([(0, OMEGA_LASER)])
+while True:
+    lo, hi = todo.popleft()
+    omega_s = (lo+hi)/2
+    todo.extend([(lo, omega_s), (omega_s, hi)])
+
+    # print('Step {} of {}'.format(i+1, len(xdat)))
+    print('  omega_s={}'.format(omega_s))
+    eff = ham.differential_raman_efficiency(
+        omega_l=OMEGA_LASER, e_l=POLAR_LASER,
+        omega_s=omega_s, e_s=POLAR_SEC,
+        Gamma_a=GAMMA_A, Gamma_b=GAMMA_B,
+        Gamma_f=GAMMA_F, E_gap=E_GAP
+    )
+
+    xdat.append(omega_s)
+    ydatr.append(eff.real)
+    ydatr = [y for x, y in sorted(zip(xdat, ydatr))]
+    xdat = sorted(xdat)
+
+    print('  eff={}'.format(eff))
+    liner.set_xdata(xdat)
+    liner.set_ydata(ydatr)
+    # linei.set_ydata(ydati)
+    ax.relim()
+    ax.autoscale_view()
+    fig.canvas.draw()
+    fig.canvas.flush_events()
+    plt.pause(1e-6)
+    time.sleep(1e-6)
+plt.ioff()
+plt.show()
