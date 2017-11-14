@@ -115,7 +115,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         """
         # TODO: verify
         mu_in = self.meff_in(state.band)
-        e = 1/2 / mu_in * self.x(state) ** 2 / self.r_0 ** 2
+        e = 1/2/mu_in/self.free_electron_mass * self.x(state)**2/self.r_0**2
         return e
 
     # -- States --
