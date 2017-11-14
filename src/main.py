@@ -48,17 +48,17 @@ EXPECTED_ROOTS_HOLES = {
 }
 
 # Raman parameters
-E_GAP = 2.097e4 * 1e2  # [cm-1]
-# E_GAP = 0
+# E_GAP = 2.097e4 * 1e2  # [cm-1]
+E_GAP = 0
 # GAMMA_A = 8.06554  # [cm-1]
 # GAMMA_B = GAMMA_A
 # GAMMA_F = 3 * GAMMA_A
-GAMMA_A = 1
-GAMMA_B = 1
-GAMMA_F = 1
+GAMMA_A = 8
+GAMMA_B = 8
+GAMMA_F = 24
 
-# OMEGA_LASER = 1000  # [cm-1]
-OMEGA_LASER = 1e7
+OMEGA_LASER = 1000  # [cm-1]
+# OMEGA_LASER = 1e7
 OMEGA_SEC = 250  # [cm-1]
 POLAR_LASER = [1., 0., 0.]
 POLAR_SEC = [1., 0., 0.]
