@@ -215,13 +215,17 @@ class RamanQD:
         return bra.l, bra.m, ket.l, ket.m, mid
 
     def _integ_e_rad_e_angular(self, bra, ket):
-        order_k0 = _integ_matelt(
-            bra=bra, mid=0, ket=ket,
-            keyfunc=self._get_key_e_rad_e_angular,
-            storedict=self._e_rad_e_angular_dict,
-            oper=lambda the, phi: 1,
-            intfunc=self._integ_e_op_e_angular
-        )
+        if (bra.l, bra.m) != (ket.l, ket.m):
+            order_k0 = 0
+        else:
+            order_k0 = 1
+        # order_k0 = _integ_matelt(
+        #     bra=bra, mid=0, ket=ket,
+        #     keyfunc=self._get_key_e_rad_e_angular,
+        #     storedict=self._e_rad_e_angular_dict,
+        #     oper=lambda the, phi: 1,
+        #     intfunc=self._integ_e_op_e_angular
+        # )
         order_k1 = _integ_matelt(
             bra=bra, mid=1, ket=ket,
             keyfunc=self._get_key_e_rad_e_angular,

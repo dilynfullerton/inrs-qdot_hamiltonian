@@ -149,10 +149,8 @@ if not path.exists(SAVENAME):
         hole_lifetime=GAMMA_H,
     )
     ham.differential_raman_cross_section(
-        omega_l=OMEGA_LASER, e_l=POLAR_LASER,
-        k_l=KAPPA_LASER, n_l=REFRACTION_IDX_LASER,
-        omega_s=OMEGA_SEC, e_s=POLAR_SEC,
-        k_s=KAPPA_SEC, n_s=REFRACTION_IDX_SEC,
+        omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
+        omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
     )
     with open(SAVENAME, 'wb') as fwb:
         pickle.dump(ham, fwb)
@@ -185,10 +183,8 @@ while True:
     # print('Step {} of {}'.format(i+1, len(xdat)))
     print('  omega_s={}'.format(omega_s))
     eff = ham.differential_raman_cross_section(
-        omega_l=OMEGA_LASER, e_l=POLAR_LASER,
-        k_l=KAPPA_LASER, n_l=REFRACTION_IDX_LASER,
-        omega_s=omega_s, e_s=POLAR_SEC,
-        k_s=KAPPA_SEC, n_s=REFRACTION_IDX_SEC
+        omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
+        omega_s=omega_s, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC
     )
 
     xdat.append(omega_ph)
