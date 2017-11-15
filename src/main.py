@@ -53,9 +53,9 @@ E_GAP = 0
 # GAMMA_A = 8.06554  # [cm-1]
 # GAMMA_B = GAMMA_A
 # GAMMA_F = 3 * GAMMA_A
-GAMMA_A = 8
-GAMMA_B = 8
-GAMMA_F = 24
+GAMMA_A = 8e-4
+GAMMA_B = 8e-4
+GAMMA_F = 2.4
 
 OMEGA_LASER = 1000  # [cm-1]
 # OMEGA_LASER = 1e7
@@ -150,7 +150,7 @@ else:
     with open(SAVENAME, 'rb') as frb:
         ham = pickle.load(frb)
 
-# domega = OMEGA_L - OMEGA_T
+domega = OMEGA_L - OMEGA_T
 # xdat = np.linspace(OMEGA_T-domega/10, OMEGA_L+domega/10, 100)
 # xdat = np.linspace(0, OMEGA_LASER, 100)
 # ydatr = np.zeros_like(xdat)
@@ -166,12 +166,12 @@ liner, = ax.plot(xdat, ydatr, '-', color='red')
 
 # for i, x in enumerate(xdat):
 
-todo = deque([(0, OMEGA_LASER)])
+todo = deque([(OMEGA_T-domega, OMEGA_L+domega)])
 while True:
     lo, hi = todo.popleft()
-    omega_s = (lo+hi)/2
-    todo.extend([(lo, omega_s), (omega_s, hi)])
-
+    omega_ph = (lo+hi)/2
+    todo.extend([(lo, omega_ph), (omega_ph, hi)])
+    omega_s = OMEGA_LASER - omega_ph
     # print('Step {} of {}'.format(i+1, len(xdat)))
     print('  omega_s={}'.format(omega_s))
     eff = ham.differential_raman_efficiency(
@@ -181,7 +181,7 @@ while True:
         Gamma_f=GAMMA_F, E_gap=E_GAP
     )
 
-    xdat.append(omega_s)
+    xdat.append(omega_ph)
     ydatr.append(eff.real)
     ydatr = [y for x, y in sorted(zip(xdat, ydatr))]
     xdat = sorted(xdat)
