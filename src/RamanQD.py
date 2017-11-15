@@ -36,7 +36,8 @@ def _integ_matelt(bra, mid, ket, keyfunc, storedict, oper, intfunc):
 
 class RamanQD:
     def __init__(
-            self, phonon_space, exiton_space, phonon_lifetime, ehp_lifetime
+            self, phonon_space, exiton_space, phonon_lifetime,
+            electron_lifetime, hole_lifetime,
     ):
         # Model parameters
         self.ph_space = phonon_space
@@ -44,7 +45,8 @@ class RamanQD:
 
         # Lifetimes
         self.gamma_ph = phonon_lifetime
-        self.gamma_ehp = ehp_lifetime
+        self.gamma_e = electron_lifetime
+        self.gamma_h = hole_lifetime
 
         # Convenience references
         self.volume = self.ph_space.volume
@@ -250,10 +252,17 @@ class RamanQD:
         return i_real + 1j * i_imag
 
     def Gamma_ehp(self, ehp_state):
-        return self.gamma_ehp  # TODO
+        # TODO
+        # For now, assuming a linear proportionality with energy
+        estate, hstate = ehp_state
+        Gamma_e = self.ex_space.get_omega(estate) * self.gamma_e
+        Gamma_h = self.ex_space.get_omega(hstate) * self.gamma_h
+        return 1j * (Gamma_e + Gamma_h)
 
     def Gamma_ph(self, phonon_state):
-        return self.gamma_ph  # TODO
+        # TODO
+        # For now, assuming linear proportionality with energy
+        return 1j * (self.ph_space.get_omega(phonon_state) * self.gamma_ph)
 
     def delta(self, omega_s, omega_l, phonon_state):
         omega_ph = self.ph_space.get_omega(phonon_state)
