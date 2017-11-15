@@ -49,6 +49,9 @@ EXPECTED_ROOTS_HOLES = {
 
 # Raman parameters
 E_GAP = 2.097e4 * 1e2  # [cm-1]
+GAMMA_PH = 2.4
+GAMMA_E = 8.e-4
+GAMMA_H = 8.e-4
 # E_GAP = 0
 # GAMMA_A = 8.06554  # [cm-1]
 # GAMMA_B = GAMMA_A
@@ -58,10 +61,11 @@ E_GAP = 2.097e4 * 1e2  # [cm-1]
 # GAMMA_F = 2.4
 
 OMEGA_LASER = 1000  # [cm-1]
-# OMEGA_LASER = 1e7
 OMEGA_SEC = 250  # [cm-1]
 POLAR_LASER = [1., 0., 0.]
 POLAR_SEC = [1., 0., 0.]
+KAPPA_LASER = [0., 0., 1]
+KAPPA_SEC = [0., 0., 1]
 REFRACTION_IDX_LASER = 1
 REFRACTION_IDX_SEC = 1
 
@@ -99,6 +103,7 @@ exiton_space = ExitonModelSpace(
     radius=RADIUS,
     V_v=V0_VAL,
     V_c=V0_COND,
+    E_gap=E_GAP,
     me_eff_in=MASS_E_IN,
     me_eff_out=MASS_E_OUT,
     mh_eff_in=MASS_H_IN,
@@ -139,10 +144,15 @@ if not path.exists(SAVENAME):
     ham = RamanQD(
         phonon_space=phonon_space,
         exiton_space=exiton_space,
+        phonon_lifetime=GAMMA_PH,
+        electron_lifetime=GAMMA_E,
+        hole_lifetime=GAMMA_H,
     )
     ham.differential_raman_cross_section(
-        omega_l=OMEGA_LASER, e_l=POLAR_LASER, omega_s=OMEGA_SEC, e_s=POLAR_SEC,
-        Gamma_a=GAMMA_A, Gamma_b=GAMMA_B, Gamma_f=GAMMA_F, E_gap=E_GAP
+        omega_l=OMEGA_LASER, e_l=POLAR_LASER,
+        k_l=KAPPA_LASER, n_l=REFRACTION_IDX_LASER,
+        omega_s=OMEGA_SEC, e_s=POLAR_SEC,
+        k_s=KAPPA_SEC, n_s=REFRACTION_IDX_SEC,
     )
     with open(SAVENAME, 'wb') as fwb:
         pickle.dump(ham, fwb)
@@ -176,9 +186,9 @@ while True:
     print('  omega_s={}'.format(omega_s))
     eff = ham.differential_raman_cross_section(
         omega_l=OMEGA_LASER, e_l=POLAR_LASER,
+        k_l=KAPPA_LASER, n_l=REFRACTION_IDX_LASER,
         omega_s=omega_s, e_s=POLAR_SEC,
-        Gamma_a=GAMMA_A, Gamma_b=GAMMA_B,
-        Gamma_f=GAMMA_F, E_gap=E_GAP
+        k_s=KAPPA_SEC, n_s=REFRACTION_IDX_SEC
     )
 
     xdat.append(omega_ph)
