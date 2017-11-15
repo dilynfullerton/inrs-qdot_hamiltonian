@@ -5,7 +5,7 @@ the definitions in Riera
 import itertools as it
 import numpy as np
 from scipy import integrate as integ
-from helper_functions import basis_pmz, threej
+from helper_functions import basis_pmz, threej, Y_lm, basis_spherical
 from ExitonModelSpace import ExitonModelSpace
 
 
@@ -18,6 +18,23 @@ def Lambda(lbj, mbj, lcj, mcj, la, ma):
     )
 
 
+def _integ_matelt(bra, mid, ket, keyfunc, storedict, oper, intfunc):
+    k = keyfunc(bra=bra, mid=mid, ket=ket)
+    if bra < ket:
+        return np.conj(
+            _integ_matelt(
+                bra=ket, mid=mid, ket=bra,
+                keyfunc=keyfunc, storedict=storedict, oper=oper,
+                intfunc=intfunc
+            )
+        )
+    elif k in storedict[k]:
+        return storedict[k]
+    else:
+        storedict[k] = intfunc(bra=bra, ket=ket, oper=oper)
+        return storedict[k]
+
+
 class RamanQD:
     def __init__(self, phonon_space, exiton_space):
         # Model parameters
@@ -26,45 +43,62 @@ class RamanQD:
 
         # Convenience references
         self.volume = self.ph_space.volume
+        self.free_electron_mass = self.ex_space.free_electron_mass
+        self.C_F = self.ph_space.C_F
+        self.R = self.ph_space.R
 
         # Matrix elements
-        self._matelts_ph = dict()
-        self._I_dict = dict()
-        self._II_dict = dict()
+        self._e_rad_e_radial_dict = dict()
+        self._e_rad_e_angular_dict = dict()
+        self._e_ph_e_radial_dict = dict()
+        self._e_ph_e_angular_dict = dict()
 
     # -- Raman cross section --
     def differential_raman_cross_section(
-            self, omega_l, e_l, omega_s, e_s, n_l, n_s):
+            self, omega_l, e_l, n_l, k_l, omega_s, e_s, n_s, k_s):
         """See Chamberlain (1)
         """
         return (
             self.volume**2 * omega_s**3 * n_l * n_s**3 / 8 / np.pi**3 /
-            omega_l * self.scattering_rate(omega_l=omega_l, omega_s=omega_s,
-                                           e_l=e_l, e_s=e_s)
+            omega_l * self.scattering_rate(
+                omega_l=omega_l, e_l=e_l, n_l=n_l, k_l=k_l,
+                omega_s=omega_s, e_s=e_s, n_s=n_s, k_s=k_s,
+            )
         )
 
-    def scattering_rate(self, omega_l, omega_s, e_l, e_s):
+    def scattering_rate(self, omega_l, e_l, n_l, k_l, omega_s, e_s, n_s, k_s):
         """See Chamberlain (2)
         :param omega_s: Secondary frequency
         :param e_s: Secondary polarization
         """
         w = 0
         for phonon in self.ph_space.states():
-            mfi = self.M_FI(omega_s=omega_s, omega_l=omega_l, e_s=e_s, e_l=e_l,
+            mfi = self.M_FI(omega_s=omega_s, e_s=e_s, n_s=n_s, k_s=k_s,
+                            omega_l=omega_l, e_l=e_l, n_l=n_l, k_l=k_l,
                             phonon=phonon)
             delta = self.delta(omega_s=omega_s, omega_l=omega_l,
                                omega_ph=self.ph_space.get_omega(phonon))
             w += 2 * np.pi * abs(mfi)**2 * delta
         return w
 
-    def M_FI(self, omega_s, omega_l, e_s, e_l, phonon):
+    def M_FI(self, omega_s, e_s, n_s, k_s, omega_l, e_l, n_l, k_l, phonon):
+        """See Chamberlain (3)
+        :param omega_s:
+        :param omega_l:
+        :param e_s:
+        :param e_l:
+        :param phonon:
+        :return:
+        """
         mfi = 0
         for mu1, mu2 in it.product(
                 self.ex_space.electron_hole_states(), repeat=2):
             numerator = (
-                self.matelt_her_p_F(bra=phonon, ket=mu2) *
+                self.matelt_her_p_F(
+                    ket=mu2, omega_s=omega_s, e_s=e_s, n_s=n_s, k_s=k_s) *
                 self.matelt_hep(bra=mu2, mid=phonon, ket=mu1) *
-                self.matelt_her_m_I(bra=mu1)
+                self.matelt_her_m_I(
+                    bra=mu1, omega_l=omega_l, e_l=e_l, n_l=n_l, k_l=k_l)
             )
             denominator = (
                 (omega_s - self.ex_space.get_omega(mu2) + self.Gamma(mu2)) *
@@ -73,308 +107,145 @@ class RamanQD:
             mfi += numerator / denominator
         return mfi
 
-    def matelt_her_p_F(self, bra, ket):
-        return 0  # TODO
+    def matelt_her_p_F(self, ket, omega_s, e_s, n_s, k_s):
+        # TODO: Make sure this should actually just be the conjugate,
+        # as I have assumed
+        return np.conj(
+            self.matelt_her_m_I(
+                bra=ket, omega_l=omega_s, e_l=e_s, n_l=n_s, k_l=k_s
+            )
+        )
+
+    def matelt_her_m_I(self, bra, omega_l, e_l, n_l, k_l):
+        """See Chamberlain (23)
+        :param bra:
+        :return:
+        """
+        elec, hole = bra
+        return (
+            1/self.free_electron_mass * np.sqrt(2*np.pi/omega_l) / n_l /
+            np.sqrt(self.volume) * np.vdot(e_l, self.p_cv()) *
+            self._integ_e_rad_e(bra=elec, ket=hole, k=k_l, omega=omega_l)
+        )
 
     def matelt_hep(self, bra, mid, ket):
-        return 0  # TODO
+        """See Chamberlain (25)
+        :param bra: electron-hole state
+        :param mid: phonon-state
+        :param ket: electron-hole state
+        """
+        ebra, hbra = bra
+        eket, hket = ket
+        m = 0
+        if hbra == hket:
+            m += self._integ_e_ph_e(bra=ebra, phonon=mid, ket=eket)
+        if ebra == eket:
+            m -= self._integ_e_ph_e(bra=hbra, phonon=mid, ket=hket)
+        return self.C_F / np.sqrt(self.R) * m
 
-    def matelt_her_m_I(self, bra):
-        return 0  # TODO
+    def p_cv(self):
+        return np.array([1, 0, 0])  # TODO
+
+    def _integ_e_ph_e(self, bra, phonon, ket):
+        return (
+            self._integ_e_ph_e_radial(bra=bra, ket=ket, phonon=phonon) *
+            self._integ_e_ph_e_angular(bra=bra, ket=ket, phonon=phonon)
+        )
+
+    def _get_key_e_ph_e_radial(self, bra, mid, ket):
+        return bra.l, bra.n, ket.l, ket.n, mid.l, mid.n
+
+    def _integ_e_ph_e_radial(self, bra, ket, phonon):
+        return _integ_matelt(
+            bra=bra, mid=phonon, ket=ket,
+            keyfunc=self._get_key_e_ph_e_radial,
+            storedict=self._e_ph_e_radial_dict,
+            oper=self.ph_space.Phi_ln(phonon),
+            intfunc=self._integ_e_op_e_radial
+        )
+
+    def _get_key_e_ph_e_angular(self, bra, mid, ket):
+        return min(
+            (bra.l, bra.m, ket.l, ket.m, mid.l, mid.m),
+            (bra.l, bra.m, mid.l, mid.m, ket.l, ket.m)
+        )
+
+    def _integ_e_ph_e_angular(self, bra, ket, phonon):
+        return _integ_matelt(
+            bra=bra, mid=phonon, ket=ket,
+            keyfunc=self._get_key_e_ph_e_angular,
+            storedict=self._e_ph_e_angular_dict,
+            oper=Y_lm(l=phonon.l, m=phonon.m),
+            intfunc=self._integ_e_op_e_angular
+        )
+
+    def _integ_e_rad_e(self, bra, ket, k, omega):
+        r_k0, r_k1 = self._integ_e_rad_e_radial(bra=bra, ket=ket)
+        a_k0, a_k1 = self._integ_e_rad_e_angular(bra=bra, ket=ket, k=k)
+        return r_k0 * a_k0 + 1j * omega * r_k1 * a_k1
+
+    def _get_key_e_rad_e_radial(self, bra, mid, ket):
+        return bra.l, bra.n, ket.l, ket.n, mid
+
+    def _integ_e_rad_e_radial(self, bra, ket):
+        order_k0 = _integ_matelt(
+            bra=bra, mid=0, ket=ket,
+            keyfunc=self._get_key_e_rad_e_radial,
+            storedict=self._e_rad_e_radial_dict,
+            oper=lambda r: 1,
+            intfunc=self._integ_e_op_e_radial
+        )
+        order_k1 = _integ_matelt(
+            bra=bra, mid=1, ket=ket,
+            keyfunc=self._get_key_e_ph_e_radial,
+            storedict=self._e_rad_e_radial_dict,
+            oper=lambda r: r,
+            intfunc=self._integ_e_op_e_radial
+        )
+        return order_k0, order_k1
+
+    def _get_key_e_rad_e_angular(self, bra, mid, ket):
+        return bra.l, bra.m, ket.l, ket.m, mid
+
+    def _integ_e_rad_e_angular(self, bra, ket, k):
+        order_k0 = _integ_matelt(
+            bra=bra, mid=0, ket=ket,
+            keyfunc=self._get_key_e_rad_e_angular,
+            storedict=self._e_rad_e_angular_dict,
+            oper=lambda the, phi: 1,
+            intfunc=self._integ_e_op_e_angular
+        )
+        order_k1 = _integ_matelt(
+            bra=bra, mid=1, ket=ket,
+            keyfunc=self._get_key_e_ph_e_angular,
+            storedict=self._e_rad_e_angular_dict,
+            oper=lambda the, phi: np.vdot(k, basis_spherical(the, phi)[0]),
+            intfunc=self._integ_e_op_e_angular
+        )
+        return order_k0, order_k1
+
+    def _integ_e_op_e_radial(self, bra, ket, oper):
+        wf_bra = self.ex_space.wavefunction_envelope_radial(bra)
+        wf_ket = self.ex_space.wavefunction_envelope_radial(ket)
+
+        def int_dr(r):
+            return r**2 * np.conj(wf_bra(r)) * oper(r) * wf_ket(r)
+        i_real = integ.quad(lambda r: int_dr(r).real, 0, np.inf)[0]
+        i_imag = integ.quad(lambda r: int_dr(r).imag, 0, np.inf)[0]
+        return i_real + 1j * i_imag
+
+    def _integ_e_op_e_angular(self, bra, ket, oper):
+        def int_dS(theta, phi):
+            wf_bra = Y_lm(l=bra.l, m=bra.m)(theta, phi)
+            wf_ket = Y_lm(l=ket.l, m=ket.m)(theta, phi)
+            return np.conj(wf_bra) * oper(theta, phi) * wf_ket * np.sin(theta)
+        ranges = [(0, np.pi), (0, 2 * np.pi)]
+        i_real = integ.nquad(lambda t, p: int_dS(t, p).real, ranges=ranges)[0]
+        i_imag = integ.nquad(lambda t, p: int_dS(t, p).imag, ranges=ranges)[0]
+        return i_real + 1j * i_imag
 
     def Gamma(self, ehp_state):
         return 0  # TODO
 
     def delta(self, omega_s, omega_l, omega_ph):
         return 0  # TODO
-
-    def _differential_raman_efficiency_p(self, omega_l, omega_s, e_s, p,
-                                         Gamma_f, Gamma_a, Gamma_b, E_gap):
-        """This is the expression of (Riera 216, 217) divided by sigma_ph.
-        """
-        t1 = 0
-        for state_ph, state_e, state_h in it.product(
-                self.ph_space.states(),
-                self.ex_space.electron_states(),
-                self.ex_space.hole_states()
-        ):
-            omega_ph = self.ph_space.get_omega(state_ph)
-            G2 = self.G2(
-                omega_l=omega_l, omega_s=omega_s, omega_ph=omega_ph,
-                state1=state_e, state2=state_h, E_gap=E_gap,
-            )
-            t2 = self.S(p=p, e_s=e_s) / (G2**2 + (Gamma_f/self.ex_space.E_0)**2)
-
-            if p == 0 and state_ph.m == 0:
-                M11 = self.Mph_j(
-                    state_e.band, p=1,
-                    state_ph=state_ph, state_e=state_e, state_h=state_h,
-                    omega_s=omega_s, omega_ph=omega_ph,
-                    Gamma_a=Gamma_a, Gamma_b=Gamma_b,
-                )
-                M12 = self.Mph_j(
-                    state_e.band, p=2,
-                    state_ph=state_ph, state_e=state_e, state_h=state_h,
-                    omega_s=omega_s, omega_ph=omega_ph,
-                    Gamma_a=Gamma_a, Gamma_b=Gamma_b,
-                )
-                M21 = self.Mph_j(
-                    state_h.band, p=1,
-                    state_ph=state_ph, state_e=state_e, state_h=state_h,
-                    omega_s=omega_s, omega_ph=omega_ph,
-                    Gamma_a=Gamma_a, Gamma_b=Gamma_b,
-                )
-                M22 = self.Mph_j(
-                    state_h.band, p=2,
-                    state_ph=state_ph, state_e=state_e, state_h=state_h,
-                    omega_s=omega_s, omega_ph=omega_ph,
-                    Gamma_a=Gamma_a, Gamma_b=Gamma_b,
-                )
-                t1 += t2 * (
-                    M11.real * M22.real + M12.real * M21.real +
-                    M11.imag * M22.imag + M12.imag * M21.imag
-                )
-            elif p > 0:
-                M1p = self.Mph_j(
-                    state_e.band, p,
-                    state_ph=state_ph, state_e=state_e, state_h=state_h,
-                    omega_s=omega_s, omega_ph=omega_ph,
-                    Gamma_a=Gamma_a, Gamma_b=Gamma_b,
-                )
-                M2p = self.Mph_j(
-                    state_h.band, p,
-                    state_ph=state_ph, state_e=state_e, state_h=state_h,
-                    omega_s=omega_s, omega_ph=omega_ph,
-                    Gamma_a=Gamma_a, Gamma_b=Gamma_b,
-                )
-                t1 += abs(M1p + M2p)**2 * t2
-        return t1
-
-    def _key_mph_j(self, transition_band, p, state_ph, state_e, state_h):
-        return (
-            transition_band, p, self.ph_space.get_nums(state_ph),
-            self.ex_space.get_nums(state_e), self.ex_space.get_nums(state_h)
-        )
-
-    def Mph_j(self, transition_band, p,
-              state_ph, state_e, state_h, omega_s, omega_ph,
-              Gamma_a, Gamma_b):
-        """See Riera (218, 219)
-        """
-        # If stored in dict, use that
-        k = self._key_mph_j(
-            transition_band=transition_band, p=p,
-            state_ph=state_ph, state_e=state_e, state_h=state_h
-        )
-        if k in self._matelts_ph:
-            mm = 0
-            fracs = self._matelts_ph[k]
-            for num1, denom1, num2, denom2 in fracs:
-                mm += (
-                    num1 / (
-                        denom1 + (omega_s + omega_ph + 1j * Gamma_a) /
-                        self.ex_space.E_0
-                    ) *
-                    num2 / (denom2 + (omega_s + 1j * Gamma_b) /
-                            self.ex_space.E_0)
-                )
-            return mm
-        else:
-            self._set_Mph_j(
-                transition_band=transition_band, p=p,
-                state_ph=state_ph, state_e=state_e, state_h=state_h
-            )
-            return self.Mph_j(
-                transition_band=transition_band, p=p,
-                state_ph=state_ph, state_e=state_e,
-                state_h=state_h, omega_s=omega_s, omega_ph=omega_ph,
-                Gamma_a=Gamma_a, Gamma_b=Gamma_b
-            )
-
-    def _set_Mph_j(self, transition_band, p, state_ph, state_e, state_h):
-        print('Computing matrix element for')
-        print('  phonon:     {}'.format(state_ph))
-        print('  electron:   {}'.format(state_e))
-        print('  hole:       {}'.format(state_h))
-        print('  transition: {}'.format(transition_band))
-        print('  p:          {}'.format(p))
-        if state_e.band == transition_band:
-            trans_state = state_e
-            next_states = self.ex_space.electron_states
-            mute_state = state_h
-        else:
-            trans_state = state_h
-            next_states = self.ex_space.hole_states
-            mute_state = state_e
-        laj, maj = trans_state.l, trans_state.m
-        e_rel_aj = self.ex_space.get_omega_rel(trans_state)
-        fracs = list()
-        for state_b in next_states():
-            lbj, mbj = state_b.l, state_b.m
-            # Check delta functions
-            if p == 1 and mbj != maj + 1:
-                continue
-            elif p == 2 and mbj != maj - 1:
-                continue
-            elif p == 3 and mbj != maj:
-                continue
-            # Get first numerator and second denominator
-            beta = self.ex_space.beta(transition_band)
-            if lbj == laj + 1:
-                first_numerator = beta * self.Pi(
-                    transition_band, 1, laj=laj, maj=maj
-                )
-            elif lbj == laj - 1:
-                first_numerator = beta * self.Pi(
-                    transition_band, 2, laj=laj, maj=maj
-                )
-            else:
-                continue
-            e_rel_bj = self.ex_space.get_omega_rel(state_b)
-            second_denominator = e_rel_aj - e_rel_bj
-            for state_c in next_states():
-                # Check delta function
-                if state_c.l != mute_state.l:
-                    continue
-                # Get first denominator and second numerator
-                e_rel_cj = self.ex_space.get_omega_rel(state_c)
-                first_denominator = e_rel_aj - e_rel_cj
-                second_numerator = (
-                    self.II(
-                        state_b=state_b, state_c=state_c, state_ph=state_ph) *
-                    Lambda(
-                        state_b.l, state_b.m, state_c.l, state_c.m,
-                        state_ph.l, state_ph.m,
-                    ) *
-                    self.I(state_b=state_b, state_a=trans_state) *
-                    self.I(state_b=mute_state, state_a=state_c)
-                )
-                fracs.append(
-                    (first_numerator, first_denominator,
-                     second_numerator, second_denominator)
-                )
-        anums0 = self.ph_space.get_nums(state_ph)
-        anums1 = self.ex_space.get_nums(state_e)
-        anums2 = self.ex_space.get_nums(state_h)
-        self._matelts_ph[transition_band, p, anums0, anums1, anums2] = fracs
-
-    # -- Getters --
-    def S(self, p, e_s):
-        """Polarization S_p. See Riera (149)
-        """
-        pms = basis_pmz()
-        if p == 1:
-            return abs(np.dot(e_s, pms[:, 0]).sum())**2
-        elif p == 2:
-            return abs(np.dot(e_s, pms[:, 1]).sum())**2
-        elif p == 3:
-            return abs(np.dot(e_s, pms[:, 2]).sum())**2
-        else:  # p = 0
-            return (abs(np.dot(e_s, pms[:, 0]).sum()) *
-                    abs(np.dot(e_s, pms[:, 1]).sum()))
-
-    def g2(self, state1, state2, omega_l, omega_s, E_gap):
-        """See Riera (150)
-        """
-        return (
-            (omega_l - E_gap - omega_s) / self.ex_space.E_0 +
-            - self.ex_space.get_omega_rel(state1) +
-            self.ex_space.get_omega_rel(state2)
-        )
-
-    def G2(self, state1, state2, omega_l, omega_s, omega_ph, E_gap):
-        """See Riera (166)
-        """
-        g2 = self.g2(
-            state1=state1, state2=state2,
-            omega_l=omega_l, omega_s=omega_s, E_gap=E_gap
-        )
-        return g2 - omega_ph / self.ex_space.E_0
-
-    def u_j(self, j):
-        """Bloch function. I have not found the definition for this in
-        Riera
-        """
-        def ujfn(r, d_r=0):
-            return 1  # TODO
-        return ujfn
-
-    def Pi(self, j, p, laj, maj):
-        if j == ExitonModelSpace.BAND_COND and p == 1:
-            return -np.sqrt(
-                (laj + maj + 2) * (laj + maj + 1) /
-                2 / (2 * laj + 1) / (2 * laj + 3)
-            )
-        elif j == ExitonModelSpace.BAND_COND and p == 2:
-            return -self.Pi(j=j, p=1, laj=laj, maj=-maj)
-        elif j == ExitonModelSpace.BAND_COND and p == 3:
-            return np.sqrt(
-                (laj - maj + 1) * (laj + maj + 1) / (2 * laj + 1) /
-                (2 * laj + 3)
-            )
-        elif p == 1:
-            return -self.Pi(j=ExitonModelSpace.BAND_COND,
-                            p=1, laj=laj-1, maj=-maj-1)
-        elif p == 2:
-            return -self.Pi(j=j, p=1, laj=laj, maj=-maj)
-        elif p == 3:
-            return self.Pi(j=ExitonModelSpace.BAND_COND,
-                           p=3, laj=laj-1, maj=maj)
-
-    # -- Matrix element integrals --
-    def _key_I(self, state_b, state_a):
-        return (
-            state_b.band, state_b.l, state_b.n,
-            state_a.band, state_a.l, state_a.n,
-        )
-
-    def I(self, state_b, state_a):
-        """Returns the radial part of the matrix element
-        <la ma na | lb mb nb>, obtained by integrating
-        R_ln^dag R_ln from r = 0 to r = inf
-        """
-        k = self._key_I(state_b, state_a)
-        if state_b > state_a:
-            return np.conj(self.I(state_a, state_b))
-        elif k in self._I_dict:
-            return self._I_dict[k]
-        psia = self.ex_space.wavefunction_envelope_radial(state_a)
-        psib = self.ex_space.wavefunction_envelope_radial(state_b)
-
-        def ifn(r):
-            return complex(np.conj(psia(r)) * psib(r)) * r**2
-
-        re = integ.quad(lambda x: ifn(x).real, 0, np.inf)[0]
-        im = integ.quad(lambda x: ifn(x).imag, 0, np.inf)[0]
-        ans = re + 1j * im
-        self._I_dict[k] = ans
-        return self.I(state_b=state_b, state_a=state_a)
-
-    def _key_II(self, state_b, state_c, state_ph):
-        return (state_b.band, state_b.l, state_b.n,
-                state_c.band, state_c.l, state_c.n,
-                state_ph.l, state_ph.n)
-
-    def II(self, state_b, state_c, state_ph):
-        """See Riera (210). Note: In Riera (210), the 'y' given to K is
-        'x', but I don't think that is correct.
-
-        Returns the radial part of the matrix element
-        < nb lb mb | H_ph_na,la,ma | nc lc mc >
-        """
-        k = self._key_II(state_b, state_c, state_ph=state_ph)
-        if state_b > state_c:
-            return np.conj(self.II(state_c, state_b, state_ph))
-        elif k in self._II_dict:
-            return self._II_dict[k]
-        Phi_ln = self.ph_space.Phi_ln(state_ph)
-        psib = self.ex_space.wavefunction_envelope_radial(state_b)
-        psic = self.ex_space.wavefunction_envelope_radial(state_c)
-
-        def ifn(r):
-            return complex(np.conj(psib(r)) * Phi_ln(r) * psic(r)) * r**2
-        re = integ.quad(lambda x: ifn(x).real, 0, np.inf)[0]
-        im = integ.quad(lambda x: ifn(x).imag, 0, np.inf)[0]
-        ans = re + 1j * im
-        self._II_dict[k] = ans
-        return self.II(state_b=state_b, state_c=state_c, state_ph=state_ph)
