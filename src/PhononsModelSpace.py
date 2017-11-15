@@ -125,7 +125,6 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
                     (l + (l + 1) * ediv) * (r/r0)**l
                 )
             else:
-
                 phi = np.sqrt(self.R) / self._u_norm(state) * (
                     (-mu_n * dj_mu + l * ediv * j_mu) / (l + (l + 1) * ediv) *
                     (r/r0)**(-l-1)
