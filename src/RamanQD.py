@@ -24,28 +24,69 @@ class RamanQD:
         self.ph_space = phonon_space
         self.ex_space = exiton_space
 
+        # Convenience references
+        self.volume = self.ph_space.volume
+
         # Matrix elements
         self._matelts_ph = dict()
         self._I_dict = dict()
         self._II_dict = dict()
 
     # -- Raman cross section --
-    def differential_raman_efficiency(self, omega_l, e_l, omega_s, e_s,
-                                      Gamma_f, Gamma_a, Gamma_b, E_gap):
-        """Differential Raman scattering efficiency for phonon assisted
-        transitions. This is based on (Riera 215), divided by sigma_ph
-        (Riera 126)
+    def differential_raman_cross_section(
+            self, omega_l, e_l, omega_s, e_s, n_l, n_s):
+        """See Chamberlain (1)
         """
-        cs = 0
-        for p in range(4):
-            cs += self._differential_raman_efficiency_p(
-                omega_l=omega_l, omega_s=omega_s, e_s=e_s, p=p,
-                Gamma_f=Gamma_f, Gamma_a=Gamma_a, Gamma_b=Gamma_b,
-                E_gap=E_gap
+        return (
+            self.volume**2 * omega_s**3 * n_l * n_s**3 / 8 / np.pi**3 /
+            omega_l * self.scattering_rate(omega_l=omega_l, omega_s=omega_s,
+                                           e_l=e_l, e_s=e_s)
+        )
+
+    def scattering_rate(self, omega_l, omega_s, e_l, e_s):
+        """See Chamberlain (2)
+        :param omega_s: Secondary frequency
+        :param e_s: Secondary polarization
+        """
+        w = 0
+        for phonon in self.ph_space.states():
+            mfi = self.M_FI(omega_s=omega_s, omega_l=omega_l, e_s=e_s, e_l=e_l,
+                            phonon=phonon)
+            delta = self.delta(omega_s=omega_s, omega_l=omega_l,
+                               omega_ph=self.ph_space.get_omega(phonon))
+            w += 2 * np.pi * abs(mfi)**2 * delta
+        return w
+
+    def M_FI(self, omega_s, omega_l, e_s, e_l, phonon):
+        mfi = 0
+        for mu1, mu2 in it.product(
+                self.ex_space.electron_hole_states(), repeat=2):
+            numerator = (
+                self.matelt_her_p_F(bra=phonon, ket=mu2) *
+                self.matelt_hep(bra=mu2, mid=phonon, ket=mu1) *
+                self.matelt_her_m_I(bra=mu1)
             )
-        t0 = 8/3 * (omega_s/self.ex_space.E_0)**2 * Gamma_f/self.ex_space.E_0
-        ans = t0 * cs
-        return ans
+            denominator = (
+                (omega_s - self.ex_space.get_omega(mu2) + self.Gamma(mu2)) *
+                (omega_l - self.ex_space.get_omega(mu1) + self.Gamma(mu1))
+            )
+            mfi += numerator / denominator
+        return mfi
+
+    def matelt_her_p_F(self, bra, ket):
+        return 0  # TODO
+
+    def matelt_hep(self, bra, mid, ket):
+        return 0  # TODO
+
+    def matelt_her_m_I(self, bra):
+        return 0  # TODO
+
+    def Gamma(self, ehp_state):
+        return 0  # TODO
+
+    def delta(self, omega_s, omega_l, omega_ph):
+        return 0  # TODO
 
     def _differential_raman_efficiency_p(self, omega_l, omega_s, e_s, p,
                                          Gamma_f, Gamma_a, Gamma_b, E_gap):

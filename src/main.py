@@ -140,7 +140,7 @@ if not path.exists(SAVENAME):
         phonon_space=phonon_space,
         exiton_space=exiton_space,
     )
-    ham.differential_raman_efficiency(
+    ham.differential_raman_cross_section(
         omega_l=OMEGA_LASER, e_l=POLAR_LASER, omega_s=OMEGA_SEC, e_s=POLAR_SEC,
         Gamma_a=GAMMA_A, Gamma_b=GAMMA_B, Gamma_f=GAMMA_F, E_gap=E_GAP
     )
@@ -174,7 +174,7 @@ while True:
     omega_s = OMEGA_LASER - omega_ph
     # print('Step {} of {}'.format(i+1, len(xdat)))
     print('  omega_s={}'.format(omega_s))
-    eff = ham.differential_raman_efficiency(
+    eff = ham.differential_raman_cross_section(
         omega_l=OMEGA_LASER, e_l=POLAR_LASER,
         omega_s=omega_s, e_s=POLAR_SEC,
         Gamma_a=GAMMA_A, Gamma_b=GAMMA_B,
