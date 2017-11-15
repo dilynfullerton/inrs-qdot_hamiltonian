@@ -255,14 +255,14 @@ class RamanQD:
         # TODO
         # For now, assuming a linear proportionality with energy
         estate, hstate = ehp_state
-        Gamma_e = self.ex_space.get_omega(estate) * self.gamma_e
-        Gamma_h = self.ex_space.get_omega(hstate) * self.gamma_h
+        Gamma_e = 1/self.ex_space.get_omega(estate) * self.gamma_e
+        Gamma_h = 1/self.ex_space.get_omega(hstate) * self.gamma_h
         return 1j * (Gamma_e + Gamma_h)
 
     def Gamma_ph(self, phonon_state):
         # TODO
         # For now, assuming linear proportionality with energy
-        return 1j * (self.ph_space.get_omega(phonon_state) * self.gamma_ph)
+        return 1j * (1/self.ph_space.get_omega(phonon_state) * self.gamma_ph)
 
     def delta(self, omega_s, omega_l, phonon_state):
         omega_ph = self.ph_space.get_omega(phonon_state)
