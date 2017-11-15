@@ -25,13 +25,6 @@ class RamanQD:
         self.ph_space = phonon_space
         self.ex_space = exiton_space
 
-        # Physical constants
-        self.meff_reduced = self.ex_space.free_electron_mass / (
-            1/self.ex_space.meff_in(band=ExitonModelSpace.BAND_COND) +
-            1/self.ex_space.meff_in(band=ExitonModelSpace.BAND_VAL)
-        )
-        self.E_0 = 1/2/self.meff_reduced/self.ph_space.R**2
-
         # Matrix elements
         self._matelts_ph = dict()
         self._I_dict = dict()
@@ -51,7 +44,7 @@ class RamanQD:
                 Gamma_f=Gamma_f, Gamma_a=Gamma_a, Gamma_b=Gamma_b,
                 E_gap=E_gap
             )
-        t0 = 8/3 * (omega_s/self.E_0)**2 * Gamma_f/self.E_0
+        t0 = 8/3 * (omega_s/self.ex_space.E_0)**2 * Gamma_f/self.ex_space.E_0
         ans = t0 * cs
         return ans
 
@@ -68,10 +61,9 @@ class RamanQD:
             omega_ph = self.ph_space.get_omega(state_ph)
             G2 = self.G2(
                 omega_l=omega_l, omega_s=omega_s, omega_ph=omega_ph,
-                xa1=self.ex_space.x(state_e), xa2=self.ex_space.x(state_h),
-                E_gap=E_gap,
+                state1=state_e, state2=state_h, E_gap=E_gap,
             )
-            t2 = self.S(p=p, e_s=e_s) / (G2**2 + (Gamma_f/self.E_0)**2)
+            t2 = self.S(p=p, e_s=e_s) / (G2**2 + (Gamma_f/self.ex_space.E_0)**2)
 
             if p == 0 and state_ph.m == 0:
                 M11 = self.Mph_j(
@@ -140,9 +132,11 @@ class RamanQD:
             for num1, denom1, num2, denom2 in fracs:
                 mm += (
                     num1 / (
-                        denom1 + (omega_s + omega_ph + 1j * Gamma_a) / self.E_0
+                        denom1 + (omega_s + omega_ph + 1j * Gamma_a) /
+                        self.ex_space.E_0
                     ) *
-                    num2 / (denom2 + (omega_s + 1j * Gamma_b) / self.E_0)
+                    num2 / (denom2 + (omega_s + 1j * Gamma_b) /
+                            self.ex_space.E_0)
                 )
             return mm
         else:
@@ -173,7 +167,7 @@ class RamanQD:
             next_states = self.ex_space.hole_states
             mute_state = state_e
         laj, maj = trans_state.l, trans_state.m
-        x2aj = self.ex_space.x(trans_state)**2
+        e_rel_aj = self.ex_space.get_omega_rel(trans_state)
         fracs = list()
         for state_b in next_states():
             lbj, mbj = state_b.l, state_b.m
@@ -185,7 +179,7 @@ class RamanQD:
             elif p == 3 and mbj != maj:
                 continue
             # Get first numerator and second denominator
-            beta = self.beta(transition_band)
+            beta = self.ex_space.beta(transition_band)
             if lbj == laj + 1:
                 first_numerator = beta * self.Pi(
                     transition_band, 1, laj=laj, maj=maj
@@ -196,15 +190,15 @@ class RamanQD:
                 )
             else:
                 continue
-            x2bj = self.ex_space.x(state_b)**2
-            second_denominator = beta * (x2aj - x2bj)
+            e_rel_bj = self.ex_space.get_omega_rel(state_b)
+            second_denominator = e_rel_aj - e_rel_bj
             for state_c in next_states():
                 # Check delta function
                 if state_c.l != mute_state.l:
                     continue
                 # Get first denominator and second numerator
-                x2cj = self.ex_space.x(state_c)**2
-                first_denominator = beta * (x2aj - x2cj)
+                e_rel_cj = self.ex_space.get_omega_rel(state_c)
+                first_denominator = e_rel_aj - e_rel_cj
                 second_numerator = (
                     self.II(
                         state_b=state_b, state_c=state_c, state_ph=state_ph) *
@@ -239,20 +233,23 @@ class RamanQD:
             return (abs(np.dot(e_s, pms[:, 0]).sum()) *
                     abs(np.dot(e_s, pms[:, 1]).sum()))
 
-    def g2(self, x1, x2, omega_l, omega_s, E_gap):
+    def g2(self, state1, state2, omega_l, omega_s, E_gap):
         """See Riera (150)
         """
         return (
-            (omega_l - E_gap - omega_s) / self.E_0 -
-            self.beta(1) * x1**2 - self.beta(2) * x2**2
+            (omega_l - E_gap - omega_s) / self.ex_space.E_0 +
+            - self.ex_space.get_omega_rel(state1) +
+            self.ex_space.get_omega_rel(state2)
         )
 
-    def G2(self, xa1, xa2, omega_l, omega_s, omega_ph, E_gap):
+    def G2(self, state1, state2, omega_l, omega_s, omega_ph, E_gap):
         """See Riera (166)
         """
         g2 = self.g2(
-            x1=xa1, x2=xa2, omega_l=omega_l, omega_s=omega_s, E_gap=E_gap)
-        return g2 - omega_ph / self.E_0
+            state1=state1, state2=state2,
+            omega_l=omega_l, omega_s=omega_s, E_gap=E_gap
+        )
+        return g2 - omega_ph / self.ex_space.E_0
 
     def u_j(self, j):
         """Bloch function. I have not found the definition for this in
@@ -261,11 +258,6 @@ class RamanQD:
         def ujfn(r, d_r=0):
             return 1  # TODO
         return ujfn
-
-    def beta(self, j):
-        """See Riera (92)
-        """
-        return self.meff_reduced / self.ex_space.meff_in(band=j)
 
     def Pi(self, j, p, laj, maj):
         if j == ExitonModelSpace.BAND_COND and p == 1:

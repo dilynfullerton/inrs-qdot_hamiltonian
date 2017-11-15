@@ -54,6 +54,11 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
 
         # Derived/inherited physical constants
         self.r_0 = radius
+        self.meff_reduced = self.free_electron_mass / (
+            1/self.meff_in(band=ExitonModelSpace.BAND_COND) +
+            1/self.meff_in(band=ExitonModelSpace.BAND_VAL)
+        )
+        self.E_0 = 1/2/self.meff_reduced/self.r_0**2
 
         # Root finding
         self._roots_x = dict()  # l, n, band -> x
@@ -114,9 +119,11 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         given single-particle mode
         """
         # TODO: verify
-        mu_in = self.meff_in(state.band)
-        e = 1/2/mu_in/self.free_electron_mass * self.x(state)**2/self.r_0**2
+        e = self.E_0 * self.get_omega_rel(state)
         return e
+
+    def get_omega_rel(self, state):
+        return self.beta(state.band) * self.x(state)**2
 
     # -- States --
     def iter_x_n(self, l, band):
@@ -196,6 +203,11 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
             return self._me_eff_out
         else:
             return self._mh_eff_out
+
+    def beta(self, j):
+        """See Riera (92)
+        """
+        return self.meff_reduced / self.meff_in(j) / self.free_electron_mass
 
     # def _A_B(self, state):
     #     """I have redefined these to be unnormalized coefficients
