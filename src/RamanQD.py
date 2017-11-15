@@ -5,8 +5,7 @@ the definitions in Riera
 import itertools as it
 import numpy as np
 from scipy import integrate as integ
-from helper_functions import basis_pmz, threej, Y_lm, basis_spherical
-from ExitonModelSpace import ExitonModelSpace
+from helper_functions import threej, Y_lm, basis_spherical
 
 
 def Lambda(lbj, mbj, lcj, mcj, la, ma):
@@ -36,10 +35,16 @@ def _integ_matelt(bra, mid, ket, keyfunc, storedict, oper, intfunc):
 
 
 class RamanQD:
-    def __init__(self, phonon_space, exiton_space):
+    def __init__(
+            self, phonon_space, exiton_space, phonon_lifetime, ehp_lifetime
+    ):
         # Model parameters
         self.ph_space = phonon_space
         self.ex_space = exiton_space
+
+        # Lifetimes
+        self.gamma_ph = phonon_lifetime
+        self.gamma_ehp = ehp_lifetime
 
         # Convenience references
         self.volume = self.ph_space.volume
@@ -101,8 +106,8 @@ class RamanQD:
                     bra=mu1, omega_l=omega_l, e_l=e_l, n_l=n_l, k_l=k_l)
             )
             denominator = (
-                (omega_s - self.ex_space.get_omega(mu2) + self.Gamma(mu2)) *
-                (omega_l - self.ex_space.get_omega(mu1) + self.Gamma(mu1))
+                (omega_s - self.ex_space.get_omega(mu2) + self.Gamma_ehp(mu2)) *
+                (omega_l - self.ex_space.get_omega(mu1) + self.Gamma_ehp(mu1))
             )
             mfi += numerator / denominator
         return mfi
@@ -244,8 +249,13 @@ class RamanQD:
         i_imag = integ.nquad(lambda t, p: int_dS(t, p).imag, ranges=ranges)[0]
         return i_real + 1j * i_imag
 
-    def Gamma(self, ehp_state):
-        return 0  # TODO
+    def Gamma_ehp(self, ehp_state):
+        return self.gamma_ehp  # TODO
 
-    def delta(self, omega_s, omega_l, omega_ph):
-        return 0  # TODO
+    def Gamma_ph(self, phonon_state):
+        return self.gamma_ph  # TODO
+
+    def delta(self, omega_s, omega_l, phonon_state):
+        omega_ph = self.ph_space.get_omega(phonon_state)
+        gamma = self.Gamma_ph(phonon_state)
+        return gamma / ((omega_l - omega_s - omega_ph)**2 + gamma**2)
