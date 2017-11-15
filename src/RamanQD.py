@@ -62,33 +62,33 @@ class RamanQD:
 
     # -- Raman cross section --
     def differential_raman_cross_section(
-            self, omega_l, e_l, n_l, k_l, omega_s, e_s, n_s, k_s):
+            self, omega_l, e_l, n_l, omega_s, e_s, n_s):
         """See Chamberlain (1)
         """
         return (
             self.volume**2 * omega_s**3 * n_l * n_s**3 / 8 / np.pi**3 /
             omega_l * self.scattering_rate(
-                omega_l=omega_l, e_l=e_l, n_l=n_l, k_l=k_l,
-                omega_s=omega_s, e_s=e_s, n_s=n_s, k_s=k_s,
+                omega_l=omega_l, e_l=e_l, n_l=n_l,
+                omega_s=omega_s, e_s=e_s, n_s=n_s
             )
         )
 
-    def scattering_rate(self, omega_l, e_l, n_l, k_l, omega_s, e_s, n_s, k_s):
+    def scattering_rate(self, omega_l, e_l, n_l, omega_s, e_s, n_s):
         """See Chamberlain (2)
         :param omega_s: Secondary frequency
         :param e_s: Secondary polarization
         """
         w = 0
         for phonon in self.ph_space.states():
-            mfi = self.M_FI(omega_s=omega_s, e_s=e_s, n_s=n_s, k_s=k_s,
-                            omega_l=omega_l, e_l=e_l, n_l=n_l, k_l=k_l,
+            mfi = self.M_FI(omega_s=omega_s, e_s=e_s, n_s=n_s,
+                            omega_l=omega_l, e_l=e_l, n_l=n_l,
                             phonon=phonon)
             delta = self.delta(omega_s=omega_s, omega_l=omega_l,
                                phonon_state=phonon)
             w += 2 * np.pi * abs(mfi)**2 * delta
         return w
 
-    def M_FI(self, omega_s, e_s, n_s, k_s, omega_l, e_l, n_l, k_l, phonon):
+    def M_FI(self, omega_s, e_s, n_s, omega_l, e_l, n_l, phonon):
         """See Chamberlain (3)
         :param omega_s:
         :param omega_l:
@@ -102,10 +102,10 @@ class RamanQD:
                 self.ex_space.electron_hole_states(), repeat=2):
             numerator = (
                 self.matelt_her_p_F(
-                    ket=mu2, omega_s=omega_s, e_s=e_s, n_s=n_s, k_s=k_s) *
+                    ket=mu2, omega_s=omega_s, e_s=e_s, n_s=n_s) *
                 self.matelt_hep(bra=mu2, mid=phonon, ket=mu1) *
                 self.matelt_her_m_I(
-                    bra=mu1, omega_l=omega_l, e_l=e_l, n_l=n_l, k_l=k_l)
+                    bra=mu1, omega_l=omega_l, e_l=e_l, n_l=n_l)
             )
             denominator = (
                 (omega_s - self.ex_space.get_omega_ehp(mu2) +
@@ -116,16 +116,14 @@ class RamanQD:
             mfi += numerator / denominator
         return mfi
 
-    def matelt_her_p_F(self, ket, omega_s, e_s, n_s, k_s):
+    def matelt_her_p_F(self, ket, omega_s, e_s, n_s):
         # TODO: Make sure this should actually just be the conjugate,
         # as I have assumed
         return np.conj(
-            self.matelt_her_m_I(
-                bra=ket, omega_l=omega_s, e_l=e_s, n_l=n_s, k_l=k_s
-            )
+            self.matelt_her_m_I(bra=ket, omega_l=omega_s, e_l=e_s, n_l=n_s)
         )
 
-    def matelt_her_m_I(self, bra, omega_l, e_l, n_l, k_l):
+    def matelt_her_m_I(self, bra, omega_l, e_l, n_l):
         """See Chamberlain (23)
         :param bra:
         :return:
@@ -134,7 +132,7 @@ class RamanQD:
         return (
             1/self.free_electron_mass * np.sqrt(2*np.pi/omega_l) / n_l /
             np.sqrt(self.volume) * np.vdot(e_l, self.p_cv()) *
-            self._integ_e_rad_e(bra=elec, ket=hole, k=k_l, omega=omega_l)
+            self._integ_e_rad_e(bra=elec, ket=hole, omega=omega_l)
         )
 
     def matelt_hep(self, bra, mid, ket):
@@ -188,9 +186,9 @@ class RamanQD:
             intfunc=self._integ_e_op_e_angular
         )
 
-    def _integ_e_rad_e(self, bra, ket, k, omega):
+    def _integ_e_rad_e(self, bra, ket, omega):
         r_k0, r_k1 = self._integ_e_rad_e_radial(bra=bra, ket=ket)
-        a_k0, a_k1 = self._integ_e_rad_e_angular(bra=bra, ket=ket, k=k)
+        a_k0, a_k1 = self._integ_e_rad_e_angular(bra=bra, ket=ket)
         return r_k0 * a_k0 + 1j * omega * r_k1 * a_k1
 
     def _get_key_e_rad_e_radial(self, bra, mid, ket):
@@ -216,7 +214,7 @@ class RamanQD:
     def _get_key_e_rad_e_angular(self, bra, mid, ket):
         return bra.l, bra.m, ket.l, ket.m, mid
 
-    def _integ_e_rad_e_angular(self, bra, ket, k):
+    def _integ_e_rad_e_angular(self, bra, ket):
         order_k0 = _integ_matelt(
             bra=bra, mid=0, ket=ket,
             keyfunc=self._get_key_e_rad_e_angular,
@@ -228,7 +226,7 @@ class RamanQD:
             bra=bra, mid=1, ket=ket,
             keyfunc=self._get_key_e_rad_e_angular,
             storedict=self._e_rad_e_angular_dict,
-            oper=lambda the, phi: np.vdot(k, basis_spherical(the, phi)[0]),
+            oper=lambda the, phi: basis_spherical(the, phi)[0][2],
             intfunc=self._integ_e_op_e_angular
         )
         return order_k0, order_k1
