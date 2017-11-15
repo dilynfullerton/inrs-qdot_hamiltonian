@@ -27,7 +27,7 @@ def _integ_matelt(bra, mid, ket, keyfunc, storedict, oper, intfunc):
                 intfunc=intfunc
             )
         )
-    elif k in storedict[k]:
+    elif k in storedict:
         return storedict[k]
     else:
         storedict[k] = intfunc(bra=bra, ket=ket, oper=oper)
@@ -84,7 +84,7 @@ class RamanQD:
                             omega_l=omega_l, e_l=e_l, n_l=n_l, k_l=k_l,
                             phonon=phonon)
             delta = self.delta(omega_s=omega_s, omega_l=omega_l,
-                               omega_ph=self.ph_space.get_omega(phonon))
+                               phonon_state=phonon)
             w += 2 * np.pi * abs(mfi)**2 * delta
         return w
 
@@ -108,8 +108,10 @@ class RamanQD:
                     bra=mu1, omega_l=omega_l, e_l=e_l, n_l=n_l, k_l=k_l)
             )
             denominator = (
-                (omega_s - self.ex_space.get_omega(mu2) + self.Gamma_ehp(mu2)) *
-                (omega_l - self.ex_space.get_omega(mu1) + self.Gamma_ehp(mu1))
+                (omega_s - self.ex_space.get_omega_ehp(mu2) +
+                 self.Gamma_ehp(mu2)) *
+                (omega_l - self.ex_space.get_omega_ehp(mu1) +
+                 self.Gamma_ehp(mu1))
             )
             mfi += numerator / denominator
         return mfi
@@ -204,7 +206,7 @@ class RamanQD:
         )
         order_k1 = _integ_matelt(
             bra=bra, mid=1, ket=ket,
-            keyfunc=self._get_key_e_ph_e_radial,
+            keyfunc=self._get_key_e_rad_e_radial,
             storedict=self._e_rad_e_radial_dict,
             oper=lambda r: r,
             intfunc=self._integ_e_op_e_radial
@@ -224,7 +226,7 @@ class RamanQD:
         )
         order_k1 = _integ_matelt(
             bra=bra, mid=1, ket=ket,
-            keyfunc=self._get_key_e_ph_e_angular,
+            keyfunc=self._get_key_e_rad_e_angular,
             storedict=self._e_rad_e_angular_dict,
             oper=lambda the, phi: np.vdot(k, basis_spherical(the, phi)[0]),
             intfunc=self._integ_e_op_e_angular
