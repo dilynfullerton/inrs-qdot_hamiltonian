@@ -1,0 +1,1 @@
+This plot is the result of forcing x and y to be real (which I think is necessary).
