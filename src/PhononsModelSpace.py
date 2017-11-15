@@ -49,7 +49,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         # NOTE: The following definition for gamma is different from gamma_0
         # of Riera
         self.gamma = (self.omega_L2 - self.omega_T2) / self.beta_T2
-        self.C_F = - np.sqrt(  # Riera (45)
+        self.C_F = np.sqrt(  # Riera (45)
             2 * pi * self.omega_L /
             self.volume * (1 / self.eps_inf_in - 1 / self.eps0_in)
         )
