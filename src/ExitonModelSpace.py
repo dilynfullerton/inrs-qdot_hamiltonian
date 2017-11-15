@@ -21,6 +21,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
             self, nmax, lmax,
             radius, V_v, V_c, me_eff_in, mh_eff_in, me_eff_out, mh_eff_out,
             free_electron_mass, expected_roots_x_elec, expected_roots_x_hole,
+            E_gap,
     ):
         """
         :param V_v: Effective potential (?) of the valence band
@@ -59,6 +60,7 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
             1/self.meff_in(band=ExitonModelSpace.BAND_VAL)
         )
         self.E_0 = 1/2/self.meff_reduced/self.r_0**2
+        self.E_gap = E_gap
 
         # Root finding
         self._roots_x = dict()  # l, n, band -> x
@@ -97,6 +99,11 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
             if s.band == ExitonModelSpace.BAND_VAL:
                 yield s
 
+    def electron_hole_states(self):
+        for e_state in self.electron_states():
+            for h_state in self.hole_states():
+                yield e_state, h_state
+
     def destroy(self, mode):
         """Returns a destruction operator for the given mode
         """
@@ -121,6 +128,10 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         # TODO: verify
         e = self.E_0 * self.get_omega_rel(state)
         return e
+
+    def get_omega_ehp(self, ehp):
+        elec, hole = ehp
+        return self.get_omega(elec) + self.get_omega(hole) + self.E_gap
 
     def get_omega_rel(self, state):
         return self.beta(state.band) * self.x(state)**2
