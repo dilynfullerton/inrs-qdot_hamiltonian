@@ -197,7 +197,7 @@ liner, = ax.plot(xdat, ydatr, '-', color='red')
 
 # for i, x in enumerate(xdat):
 
-todo = deque([(OMEGA_T-domega, OMEGA_L+domega)])
+todo = deque([(OMEGA_T-.5*domega, OMEGA_L+.5*domega)])
 while True:
     lo, hi = todo.popleft()
     omega_ph = (lo+hi)/2
