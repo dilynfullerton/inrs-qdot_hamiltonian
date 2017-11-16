@@ -98,8 +98,13 @@ class RamanQD:
         :return:
         """
         mfi = 0
-        for mu1, mu2 in it.product(
-                self.ex_space.electron_hole_states(), repeat=2):
+        for mu1, mu2 in it.product(self.ex_space.electron_hole_states(),
+                                   repeat=2):
+            if not self.selection_rules(ehp1=mu1, ehp2=mu2, phonon=phonon):
+                continue
+            # print(phonon)
+            # print(mu1)
+            # print(mu2)
             numerator = (
                 self.matelt_her_p_F(
                     ket=mu2, omega_s=omega_s, e_s=e_s, n_s=n_s) *
@@ -109,12 +114,24 @@ class RamanQD:
             )
             denominator = (
                 (omega_s - self.ex_space.get_omega_ehp(mu2) +
-                 self.Gamma_ehp(mu2)) *
+                 1j * self.Gamma_ehp(mu2)) *
                 (omega_l - self.ex_space.get_omega_ehp(mu1) +
-                 self.Gamma_ehp(mu1))
+                 1j * self.Gamma_ehp(mu1))
             )
-            mfi += numerator / denominator
+            mfi0 = numerator / denominator
+            # print('    {}'.format(mfi0))
+            mfi += mfi0
         return mfi
+
+    def selection_rules(self, ehp1, ehp2, phonon):
+        """Returns true if pass selection rules
+        """
+        e1, h1 = ehp1
+        e2, h2 = ehp2
+        return (
+            (h1 == h2 and e1.m == e2.m and abs(e1.l - e2.l) < 2) or
+            (e1 == e2 and h1.m == h2.m and abs(h1.l - h2.l) < 2)
+        )
 
     def matelt_her_p_F(self, ket, omega_s, e_s, n_s):
         # TODO: Make sure this should actually just be the conjugate,
@@ -144,9 +161,10 @@ class RamanQD:
         ebra, hbra = bra
         eket, hket = ket
         m = 0
-        if hbra == hket:
+        # The m and l requirements follow from selection rules
+        if hbra == hket and ebra.m == eket.m and abs(ebra.l - eket.l) < 2:
             m += self._integ_e_ph_e(bra=ebra, phonon=mid, ket=eket)
-        if ebra == eket:
+        if ebra == eket and hbra.m == hket.m and abs(hbra.l - hket.l) < 2:
             m -= self._integ_e_ph_e(bra=hbra, phonon=mid, ket=hket)
         return self.C_F / np.sqrt(self.R) * m
 
@@ -209,23 +227,20 @@ class RamanQD:
             oper=lambda r: r,
             intfunc=self._integ_e_op_e_radial
         )
+        # order_k1 = 0
         return order_k0, order_k1
 
     def _get_key_e_rad_e_angular(self, bra, mid, ket):
         return bra.l, bra.m, ket.l, ket.m, mid
 
     def _integ_e_rad_e_angular(self, bra, ket):
-        if (bra.l, bra.m) != (ket.l, ket.m):
-            order_k0 = 0
-        else:
-            order_k0 = 1
-        # order_k0 = _integ_matelt(
-        #     bra=bra, mid=0, ket=ket,
-        #     keyfunc=self._get_key_e_rad_e_angular,
-        #     storedict=self._e_rad_e_angular_dict,
-        #     oper=lambda the, phi: 1,
-        #     intfunc=self._integ_e_op_e_angular
-        # )
+        order_k0 = _integ_matelt(
+            bra=bra, mid=0, ket=ket,
+            keyfunc=self._get_key_e_rad_e_angular,
+            storedict=self._e_rad_e_angular_dict,
+            oper=lambda the, phi: 1,
+            intfunc=self._integ_e_op_e_angular
+        )
         order_k1 = _integ_matelt(
             bra=bra, mid=1, ket=ket,
             keyfunc=self._get_key_e_rad_e_angular,
@@ -233,6 +248,7 @@ class RamanQD:
             oper=lambda the, phi: basis_spherical(the, phi)[0][2],
             intfunc=self._integ_e_op_e_angular
         )
+        # order_k1 = 0
         return order_k0, order_k1
 
     def _integ_e_op_e_radial(self, bra, ket, oper):
@@ -259,16 +275,19 @@ class RamanQD:
         # TODO
         # For now, assuming a linear proportionality with energy
         estate, hstate = ehp_state
-        Gamma_e = 1/self.ex_space.get_omega(estate) * self.gamma_e
-        Gamma_h = 1/self.ex_space.get_omega(hstate) * self.gamma_h
-        return 1j * (Gamma_e + Gamma_h)
+        # Gamma_e = self.gamma_e / self.ex_space.get_omega(estate).real
+        # Gamma_h = self.gamma_h / self.ex_space.get_omega(hstate).real
+        Gamma_e = self.gamma_e
+        Gamma_h = self.gamma_h
+        return Gamma_e + Gamma_h
 
     def Gamma_ph(self, phonon_state):
         # TODO
         # For now, assuming linear proportionality with energy
-        return 1j * (1/self.ph_space.get_omega(phonon_state) * self.gamma_ph)
+        # return 1j * self.gamma_ph / self.ph_space.get_omega(phonon_state).real
+        return self.gamma_ph
 
     def delta(self, omega_s, omega_l, phonon_state):
         omega_ph = self.ph_space.get_omega(phonon_state)
         gamma = self.Gamma_ph(phonon_state)
-        return gamma / ((omega_l - omega_s - omega_ph)**2 + gamma**2)
+        return gamma / (abs(omega_l - omega_s - omega_ph)**2 + abs(gamma)**2)

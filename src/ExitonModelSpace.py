@@ -220,13 +220,6 @@ class ExitonModelSpace(ModelSpace, RootSolverComplex2d):
         """
         return self.meff_reduced / self.meff_in(j) / self.free_electron_mass
 
-    # def _A_B(self, state):
-    #     """I have redefined these to be unnormalized coefficients
-    #     """
-    #     jln = J(l=state.l+1/2)(self.x(state))
-    #     kln = K(l=state.l+1/2)(self.y(state))
-    #     return kln, jln
-
     # -- Obtaining roots --
     def _root_dict_key(self, state):
         return state.l, state.n, state.band

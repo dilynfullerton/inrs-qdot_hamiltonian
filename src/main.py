@@ -7,6 +7,8 @@ from os import path
 import time
 import pickle
 from collections import deque
+import itertools as it
+from scipy import integrate as integ
 # import warnings
 # warnings.filterwarnings('error')
 
@@ -49,7 +51,7 @@ EXPECTED_ROOTS_HOLES = {
 
 # Raman parameters
 E_GAP = 2.097e4 * 1e2  # [cm-1]
-GAMMA_PH = 2.4
+GAMMA_PH = 2
 GAMMA_E = 8.e-4
 GAMMA_H = 8.e-4
 # E_GAP = 0
@@ -112,6 +114,27 @@ exiton_space = ExitonModelSpace(
     expected_roots_x_elec=EXPECTED_ROOTS_ELECTRONS,
     expected_roots_x_hole=EXPECTED_ROOTS_HOLES,
 )
+
+# for s1, s2 in it.combinations_with_replacement(exiton_space.states(), r=2):
+#     if (s1.l, s1.m) != (s2.l, s2.m):
+#         continue
+#
+#     wfr1 = exiton_space.wavefunction_envelope_radial(s1)
+#     wfr2 = exiton_space.wavefunction_envelope_radial(s2)
+#     wfa1 = exiton_space.wavefunction_envelope_angular(s1)
+#     wfa2 = exiton_space.wavefunction_envelope_angular(s2)
+#
+#     def intfn(r, theta, phi):
+#         dV = np.sin(theta) * r**2
+#         return np.conj(wfr1(r) * wfa1(theta, phi)) * (wfr2(r) * wfa2(theta, phi)) * dV
+#     real_part = integ.nquad(lambda a, b, c: intfn(a, b, c).real,
+#                             ranges=[(0, np.inf), (0, np.pi), (0, 2 * np.pi)])[0]
+#     imag_part = integ.nquad(lambda a, b, c: intfn(a, b, c).imag,
+#                             ranges=[(0, np.inf), (0, np.pi), (0, 2 * np.pi)])[0]
+#     print('{}, \t{}'.format(s1, s2))
+#     print('  {}'.format(real_part + 1j * imag_part))
+
+
 
 # fig, ax = plt.subplots(1, 1)
 # for s in exiton_space.states():
