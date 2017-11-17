@@ -61,6 +61,7 @@ class RamanQD:
         self._e_rad_e_angular_dict = dict()
         self._e_ph_e_radial_dict = dict()
         self._e_ph_e_angular_dict = dict()
+        self._e_cav_e_dict = dict()
 
     # -- Raman cross section --
     def differential_raman_cross_section(
@@ -147,7 +148,6 @@ class RamanQD:
                   4. |ph=ph, cav=1, rad=S, e=0, h=0>
 
             (d2) ph-h, cav-h
-
 
         :param omega_l:
         :param e_l:
@@ -360,12 +360,12 @@ class RamanQD:
         if cav_f.n == 1 and h1 == h2 and h2 == h3:
             return (
                 self._rule_phonon(state1=e1, state2=e2, ph=ph_f) and
-                self._rule_cavity(state1=e2, state2=e3, cav=cav_f) or
+                self._rule_cavity(state1=e2, state2=e3, cav=cav_f)
             )
         elif cav_f.n == 1 and e1 == e2 and e2 == e3:
             return (
                 self._rule_phonon(state1=h1, state2=h2, ph=ph_f) and
-                self._rule_cavity(state1=h2, state2=h3, cav=cav_f) or
+                self._rule_cavity(state1=h2, state2=h3, cav=cav_f)
             )
         else:
             return False
@@ -412,12 +412,35 @@ class RamanQD:
         return self.C_F / np.sqrt(self.R) * m
 
     def matelt_hec(self, bra, ket, cav):
-        return 0  # TODO
+        ebra, hbra = bra
+        eket, hket = ket
+        melt = 0
+        if hbra == hket:
+            melt += self._integ_e_cav_e(bra=ebra, ket=eket, cav=cav)
+        if ebra == eket:
+            melt -= self._integ_e_cav_e(bra=hbra, ket=hket, cav=cav)
+        return melt
 
     def p_cv(self):
         return np.array([1, 0, 0])  # TODO
 
     # --- Integrals ---
+    def _get_key_e_cav_e(self, bra, mid, ket):
+        return (
+            bra.band, bra.l, bra.m, bra.n,
+            ket.band, ket.l, ket.m, ket.n,
+            mid.n
+        )
+
+    def _integ_e_cav_e(self, bra, ket, cav):
+        return _integ_matelt(
+            bra=bra, mid=cav, ket=ket,
+            keyfunc=self._get_key_e_cav_e,
+            storedict=self._e_cav_e_dict,
+            oper=self.cav_space.potential(cav),
+            intfunc=self._integ_e_op_e_volume_spherical,
+        )
+
     def _integ_e_ph_e(self, bra, phonon, ket):
         return (
             self._integ_e_ph_e_radial(bra=bra, ket=ket, phonon=phonon) *
@@ -425,7 +448,7 @@ class RamanQD:
         )
 
     def _get_key_e_ph_e_radial(self, bra, mid, ket):
-        return bra.l, bra.n, ket.l, ket.n, mid.l, mid.n
+        return bra.band, bra.l, bra.n, ket.band, ket.l, ket.n, mid.l, mid.n
 
     def _integ_e_ph_e_radial(self, bra, ket, phonon):
         return _integ_matelt(
@@ -457,7 +480,7 @@ class RamanQD:
         return r_k0 * a_k0 + 1j * omega * r_k1 * a_k1
 
     def _get_key_e_rad_e_radial(self, bra, mid, ket):
-        return bra.l, bra.n, ket.l, ket.n, mid
+        return bra.band, bra.l, bra.n, ket.band, ket.l, ket.n, mid
 
     def _integ_e_rad_e_radial(self, bra, ket):
         order_k0 = _integ_matelt(
@@ -518,28 +541,41 @@ class RamanQD:
         i_imag = integ.nquad(lambda t, p: int_dS(t, p).imag, ranges=ranges)[0]
         return i_real + 1j * i_imag
 
+    def _integ_e_op_e_volume_spherical(self, bra, ket, oper):
+        """Spherical volume integral over all space
+        :param bra: electron or hole state
+        :param ket: electron or hole state
+        :param oper: scalar function of spherical coordinates (r, theta, phi)
+        """
+        def int_dV(r, theta, phi):
+            dV = np.sin(theta) * r**2
+            wf_bra = self.ex_space.wavefunction_envelope(bra)(r, theta, phi)
+            wf_ket = self.ex_space.wavefunction_envelope(ket)(r, theta, phi)
+            return np.conj(wf_bra) * oper(r, theta, phi) * wf_ket * dV
+        ranges = [(0, np.inf), (0, np.pi), (0, 2 * np.pi)]
+        i_real = integ.nquad(lambda r, th, ph: int_dV(r, th, ph).real,
+                             ranges=ranges)[0]
+        i_imag = integ.nquad(lambda r, th, ph: int_dV(r, th, ph).imag,
+                             ranges=ranges)[0]
+        return i_real + 1j * i_imag
+
     # --- Lifetimes --
     def Gamma_ehp(self, ehp_state):
         # TODO
-        # For now, assuming a linear proportionality with energy
         estate, hstate = ehp_state
-        # Gamma_e = self.gamma_e / self.ex_space.get_omega(estate).real
-        # Gamma_h = self.gamma_h / self.ex_space.get_omega(hstate).real
         Gamma_e = self.gamma_e
         Gamma_h = self.gamma_h
         return Gamma_e + Gamma_h
 
     def Gamma_ph(self, phonon_state):
         # TODO
-        # For now, assuming linear proportionality with energy
-        # return 1j * self.gamma_ph / self.ph_space.get_omega(phonon_state).real
         return self.gamma_ph
 
     def Gamma_cav_hi(self):
-        return 1  # TODO
+        return self.gamma_cav  # TODO
 
     def Gamma_cav_lo(self):
-        return 1  # TODO
+        return 0  # TODO
 
     def delta(self, omega_s, omega_l, phonon_state):
         omega_ph = self.ph_space.get_omega(phonon_state)
@@ -547,4 +583,14 @@ class RamanQD:
         return gamma / (abs(omega_l - omega_s - omega_ph)**2 + abs(gamma)**2)
 
     def delta_cav(self, omega_s, omega_l, phonon_state, final_cavity):
-        return 0  # TODO
+        omega_ph = self.ph_space.get_omega(phonon_state)
+        gamma = self.Gamma_ph(phonon_state)
+        omega_cav_hi = self.cav_space.omega_hi
+        omega_cav_lo = self.cav_space.omega_lo
+        if final_cavity == self.cav_space.hi:
+            d_omega_cav = omega_cav_hi - omega_cav_lo
+        else:
+            d_omega_cav = omega_cav_lo - omega_cav_hi
+        return gamma / (
+            abs(omega_l - omega_s - omega_ph - d_omega_cav)**2 + abs(gamma)**2
+        )

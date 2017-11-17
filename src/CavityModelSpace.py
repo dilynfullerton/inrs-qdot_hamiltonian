@@ -20,6 +20,8 @@ class CavityModelSpace(ModelSpace):
         self.g_e = g_e
         self.lo = CavityMode(n=0)
         self.hi = CavityMode(n=1)
+        self.omega_lo = self.get_omega(self.lo)
+        self.omega_hi = self.get_omega(self.hi)
 
     def nfock(self, mode):
         return 2
@@ -45,14 +47,15 @@ class CavityModelSpace(ModelSpace):
 
     def potential(self, mode):
         # TODO: Find a theoretically-justified potential
-        def phi(x):
+        def func(r, theta, phi):
             omega = self.get_omega(mode)
-            if mode.n == 1:
+            x = r * np.sin(theta) * np.cos(phi)
+            if mode.n == 1 and -self.length/2 <= x <= self.length/2:
                 return self.g_e * self.length / omega / 2 * (
                     np.exp(self.get_omega(mode) * (-x/self.length - 1/2)) +
                     np.exp(self.get_omega(mode) * (x/self.length - 1/2))
                 )
             else:
                 return 0
-        return phi
+        return func
 
