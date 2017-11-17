@@ -202,9 +202,11 @@ if not path.exists(SAVENAME):
         omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
         include_cavity=True,
     )
+    print('Saving matrix elements locally')
     with open(SAVENAME, 'wb') as fwb:
         pickle.dump(ham, fwb)
 else:
+    print('Retrieving saved Hamiltonian')
     with open(SAVENAME, 'rb') as frb:
         ham = pickle.load(frb)
 

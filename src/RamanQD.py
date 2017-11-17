@@ -194,7 +194,7 @@ class RamanQD:
             numerator = (
                 self.matelt_her_p_F(
                     ket=mu2, omega_s=omega_s, e_s=e_s, n_s=n_s) *
-                self.matelt_hep(bra=mu2, mid=phonon, ket=mu1) *
+                self.matelt_hep(bra=mu2, ph=phonon, ket=mu1) *
                 self.matelt_her_m_I(
                     bra=mu1, omega_l=omega_l, e_l=e_l, n_l=n_l)
             )
@@ -207,6 +207,9 @@ class RamanQD:
             mfi0 = numerator / denominator
             # print('    {}'.format(mfi0))
             mfi += mfi0
+        print('  final phonon = {}'.format(phonon))
+        print('  M_FI         = {}'.format(mfi))
+        print()
         return mfi
 
     def M_FI_cav(self, omega_s, e_s, n_s, omega_l, e_l, n_l,
@@ -232,10 +235,10 @@ class RamanQD:
                 # Matrix element 1->2 (destroy/create cavity)
                 m12 = self.matelt_hec(bra=mu2, ket=mu1, cav=final_cavity)
                 # Matrix element 2->3 (create phonon)
-                m23 = self.matelt_hep(bra=mu3, mid=phonon, ket=mu2)
+                m23 = self.matelt_hep(bra=mu3, ket=mu2, ph=phonon)
             else:
                 # Matrix element 1->2 (create phonon)
-                m12 = self.matelt_hep(bra=mu2, mid=phonon, ket=mu1)
+                m12 = self.matelt_hep(bra=mu2, ket=mu1, ph=phonon)
                 # Matrix element 2->3 (destroy/create cavity)
                 m23 = self.matelt_hec(bra=mu3, ket=mu2, cav=final_cavity)
 
@@ -279,6 +282,10 @@ class RamanQD:
                 m01 * m12 * m23 * m34 / (d1 + 1j * g1) / (d2 + 1j * g2) /
                 (d3 + 1j * g3)
             )
+        print('  final phonon = {}'.format(phonon))
+        print('  final cavity = {}'.format(final_cavity))
+        print('  M_FI         = {}'.format(mfi))
+        print()
         return mfi
 
     def selection_rules(self, ehp1, ehp2, phonon):
@@ -372,10 +379,12 @@ class RamanQD:
             return False
 
     def _rule_phonon(self, state1, state2, ph):
+        # TODO: Justify this rule from Chamberlain
         return state1.m == state2.m and abs(state1.l - state2.l) < 2
 
     def _rule_cavity(self, state1, state2, cav):
-        return True  # TODO
+        # TODO: Figure out if this is correct
+        return state1.m == state2.m and abs(state1.l - state2.l) < 2
 
     def matelt_her_p_F(self, ket, omega_s, e_s, n_s):
         # TODO: Make sure this should actually just be the conjugate,
@@ -396,10 +405,10 @@ class RamanQD:
             self._integ_e_rad_e(bra=elec, ket=hole, omega=omega_l)
         )
 
-    def matelt_hep(self, bra, mid, ket):
+    def matelt_hep(self, bra, ph, ket):
         """See Chamberlain (25)
         :param bra: electron-hole state
-        :param mid: phonon-state
+        :param ph: phonon-state
         :param ket: electron-hole state
         """
         ebra, hbra = bra
@@ -407,9 +416,9 @@ class RamanQD:
         m = 0
         # The m and l requirements follow from selection rules
         if hbra == hket and ebra.m == eket.m and abs(ebra.l - eket.l) < 2:
-            m += self._integ_e_ph_e(bra=ebra, phonon=mid, ket=eket)
+            m += self._integ_e_ph_e(bra=ebra, phonon=ph, ket=eket)
         if ebra == eket and hbra.m == hket.m and abs(hbra.l - hket.l) < 2:
-            m -= self._integ_e_ph_e(bra=hbra, phonon=mid, ket=hket)
+            m -= self._integ_e_ph_e(bra=hbra, phonon=ph, ket=hket)
         return self.C_F / np.sqrt(self.R) * m
 
     def matelt_hec(self, bra, ket, cav):
