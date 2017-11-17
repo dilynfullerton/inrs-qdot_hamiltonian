@@ -58,6 +58,8 @@ class RamanQD:
         self.R = self.ph_space.R
 
         # Matrix elements
+        self._mfi_ph_dict = dict()
+        self._mfi_ph_cav_dict = dict()
         self._e_rad_e_radial_dict = dict()
         self._e_rad_e_angular_dict = dict()
         self._e_ph_e_radial_dict = dict()
@@ -100,6 +102,8 @@ class RamanQD:
         """
         w = 0
         for phonon in self.ph_space.states():
+            if phonon.m != 0:  # TODO
+                continue
             mfi = self.M_FI(
                 omega_s=omega_s, e_s=e_s, n_s=n_s,
                 omega_l=omega_l, e_l=e_l, n_l=n_l, phonon=phonon
@@ -160,6 +164,8 @@ class RamanQD:
         """
         w = 0
         for phonon in self.ph_space.states():
+            if phonon.m != 0:  # TODO
+                continue
             for final_cavity in self.cav_space.states():
                 mfi = self.M_FI_cav(
                     omega_s=omega_s, e_s=e_s, n_s=n_s,
@@ -183,17 +189,32 @@ class RamanQD:
         :param phonon:
         :return:
         """
+        key = self._get_key_M_FI(phonon)
+        if key in self._mfi_ph_dict:
+            return self._mfi_ph_dict[key]
+        else:
+            self._set_M_FI(
+                omega_s=omega_s, e_s=e_s, n_s=n_s,
+                omega_l=omega_l, e_l=e_l, n_l=n_l,
+                phonon=phonon, storedict=self._mfi_ph_dict, key=key
+            )
+            return self._mfi_ph_dict[key]
+
+    def _get_key_M_FI(self, phonon):
+        return phonon.l, phonon.m, phonon.n
+
+    def _set_M_FI(self, omega_s, e_s, n_s, omega_l, e_l, n_l,
+                  phonon, storedict, key):
         mfi = 0
+        omega_s = omega_l - self.ph_space.get_omega(phonon)
         for mu1, mu2 in it.product(self.ex_space.electron_hole_states(),
                                    repeat=2):
             if not self.selection_rules(ehp1=mu1, ehp2=mu2, phonon=phonon):
                 continue
-            # print(phonon)
-            # print(mu1)
-            # print(mu2)
             numerator = (
                 self.matelt_her_p_F(
-                    ket=mu2, omega_s=omega_s, e_s=e_s, n_s=n_s) *
+                    ket=mu2, omega_s=omega_s, e_s=e_s, n_s=n_s
+                ) *
                 self.matelt_hep(bra=mu2, ph=phonon, ket=mu1) *
                 self.matelt_her_m_I(
                     bra=mu1, omega_l=omega_l, e_l=e_l, n_l=n_l)
@@ -210,10 +231,27 @@ class RamanQD:
         print('  final phonon = {}'.format(phonon))
         print('  M_FI         = {}'.format(mfi))
         print()
-        return mfi
+        storedict[key] = mfi
 
     def M_FI_cav(self, omega_s, e_s, n_s, omega_l, e_l, n_l,
                  phonon, final_cavity):
+        key = self._get_key_M_FI_cav(phonon=phonon, cavity=final_cavity)
+        if key in self._mfi_ph_cav_dict:
+            return self._mfi_ph_cav_dict[key]
+        else:
+            self._set_M_FI_cav(
+                omega_s=omega_s, e_s=e_s, n_s=n_s,
+                omega_l=omega_l, e_l=e_l, n_l=n_l,
+                phonon=phonon, final_cavity=final_cavity,
+                storedict=self._mfi_ph_cav_dict, key=key
+            )
+            return self._mfi_ph_cav_dict[key]
+
+    def _get_key_M_FI_cav(self, phonon, cavity):
+        return phonon.l, phonon.m, phonon.n, cavity.n
+
+    def _set_M_FI_cav(self, omega_s, e_s, n_s, omega_l, e_l, n_l,
+                      phonon, final_cavity, storedict, key):
         mfi = 0
         for mu1, mu2, mu3 in it.product(
                 self.ex_space.electron_hole_states(), repeat=3
@@ -225,12 +263,6 @@ class RamanQD:
             if not any(rules_abcd):
                 continue
             sela, selb, selc, seld = rules_abcd
-            # Matrix element 0->1 (destroy radiation)
-            m01 = self.matelt_her_m_I(bra=mu1, omega_l=omega_l,
-                                      e_l=e_l, n_l=n_l)
-            # Matrix element 3->4 (create radiation)
-            m34 = self.matelt_her_p_F(ket=mu3, omega_s=omega_s,
-                                      e_s=e_s, n_s=n_s)
             if sela or selc:
                 # Matrix element 1->2 (destroy/create cavity)
                 m12 = self.matelt_hec(bra=mu2, ket=mu1, cav=final_cavity)
@@ -252,6 +284,16 @@ class RamanQD:
                 gcav_f = self.Gamma_cav_hi()
                 omega_cav_i = self.cav_space.get_omega(self.cav_space.lo)
                 omega_cav_f = self.cav_space.get_omega(self.cav_space.hi)
+
+            d_omega_cav = omega_cav_f - omega_cav_i
+            omega_ph = self.ph_space.get_omega(phonon)
+            omega_s = omega_l - omega_ph - d_omega_cav
+            # Matrix element 0->1 (destroy radiation)
+            m01 = self.matelt_her_m_I(bra=mu1, omega_l=omega_l,
+                                      e_l=e_l, n_l=n_l)
+            # Matrix element 3->4 (create radiation)
+            m34 = self.matelt_her_p_F(ket=mu3, omega_s=omega_s,
+                                      e_s=e_s, n_s=n_s)
 
             emu2 = self.ex_space.get_omega_ehp(mu2)
 
@@ -286,7 +328,7 @@ class RamanQD:
         print('  final cavity = {}'.format(final_cavity))
         print('  M_FI         = {}'.format(mfi))
         print()
-        return mfi
+        storedict[key] = mfi
 
     def selection_rules(self, ehp1, ehp2, phonon):
         """Returns true if pass selection rules
@@ -611,7 +653,8 @@ class RamanQD:
         return self.gamma_ph
 
     def Gamma_cav_hi(self):
-        return self.gamma_cav  # TODO
+        # TODO
+        return self.gamma_cav * self.cav_space.length**2 / self.cav_space.area
 
     def Gamma_cav_lo(self):
         return 0  # TODO

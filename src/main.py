@@ -77,14 +77,14 @@ OMEGA_CAV = (OMEGA_L - OMEGA_T) / 16
 ANTENNA_L = 1.e2  # [nm]
 ANTENNA_W = 1.e3  # [nm]
 ANTENNA_H = 1.e3  # [nm]
-COUPLING_E_CAV = 1.0e-4
+COUPLING_E_CAV = 1.0e4
 
 # Raman parameters
 E_GAP = 2.097e4 * 1e2  # [cm-1]
 GAMMA_PH = 2
 GAMMA_E = 8.e-4
 GAMMA_H = 8.e-4
-GAMMA_CAV = 4.e-2  # [nm^2]
+GAMMA_CAV = 4.0
 # E_GAP = 0
 # GAMMA_A = 8.06554  # [cm-1]
 # GAMMA_B = GAMMA_A
@@ -218,12 +218,12 @@ if not path.exists(SAVENAME):
         omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
         include_cavity=False,
     )
-    # print('Computing cavity matrix elements')
-    # ham.differential_raman_cross_section(
-    #     omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
-    #     omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
-    #     include_cavity=True,
-    # )
+    print('Computing cavity matrix elements')
+    ham.differential_raman_cross_section(
+        omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
+        omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
+        include_cavity=True,
+    )
     print('Saving matrix elements locally')
     with open(SAVENAME, 'wb') as fwb:
         pickle.dump(ham, fwb)
@@ -249,7 +249,7 @@ liner, = ax.plot(xdat, ydatr, '-', color='red')
 # for i, x in enumerate(xdat):
 
 todo = deque([(OMEGA_T-.5*domega, OMEGA_L+.5*domega)])
-while True:
+for pointcount in it.count():
     lo, hi = todo.popleft()
     omega_ph = (lo+hi)/2
     todo.extend([(lo, omega_ph), (omega_ph, hi)])
@@ -260,6 +260,11 @@ while True:
         omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
         omega_s=omega_s, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
         include_cavity=False,
+    )
+    eff += ham.differential_raman_cross_section(
+        omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
+        omega_s=omega_s, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
+        include_cavity=True,
     )
 
     xdat.append(omega_ph)
@@ -277,5 +282,7 @@ while True:
     fig.canvas.flush_events()
     plt.pause(1e-6)
     time.sleep(1e-6)
+    if pointcount > 1000:
+        break
 plt.ioff()
 plt.show()
