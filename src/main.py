@@ -126,8 +126,8 @@ for s in phonon_space.states():
 # plt.show()
 
 # Plot roots for phonon potential
-# phonon_space.plot_root_function_mu(l=0, xdat=XDAT_MU, show=True)
-# phonon_space.plot_root_function_mu(l=1, xdat=XDAT_MU, show=True)
+phonon_space.plot_root_function_mu(l=0, xdat=XDAT_MU, show=True)
+phonon_space.plot_root_function_mu(l=1, xdat=XDAT_MU, show=True)
 
 # Get exiton space
 exiton_space = ExitonModelSpace(
@@ -239,11 +239,13 @@ domega = OMEGA_L - OMEGA_T
 # ydati = np.zeros_like(xdat)
 
 plt.ion()
-fig, ax = plt.subplots(1, 1)
+fig, ax = plt.subplots(1, 2)
+ax, ax_cav = ax
 xdat = []
 ydatr = []
-# ydati = []
+ydatr_cav = []
 liner, = ax.plot(xdat, ydatr, '-', color='red')
+liner_cav, = ax_cav.plot(xdat, ydatr_cav, '-', color='red')
 # linei, = ax.plot(xdat, ydati, '-', color='blue')
 
 # for i, x in enumerate(xdat):
@@ -261,23 +263,32 @@ for pointcount in it.count():
         omega_s=omega_s, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
         include_cavity=False,
     )
-    eff += ham.differential_raman_cross_section(
+    eff_cav = eff + ham.differential_raman_cross_section(
         omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
         omega_s=omega_s, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
         include_cavity=True,
     )
 
     xdat.append(omega_ph)
+
     ydatr.append(eff.real)
+    ydatr_cav.append(eff_cav.real)
+
     ydatr = [y for x, y in sorted(zip(xdat, ydatr))]
+    ydatr_cav = [y for x, y in sorted(zip(xdat, ydatr_cav))]
+
     xdat = sorted(xdat)
 
     print('  eff={}'.format(eff))
     liner.set_xdata(xdat)
     liner.set_ydata(ydatr)
+    liner_cav.set_xdata(xdat)
+    liner_cav.set_ydata(ydatr_cav)
     # linei.set_ydata(ydati)
     ax.relim()
     ax.autoscale_view()
+    ax_cav.relim()
+    ax_cav.autoscale_view()
     fig.canvas.draw()
     fig.canvas.flush_events()
     plt.pause(1e-6)
