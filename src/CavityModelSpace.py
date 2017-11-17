@@ -18,6 +18,8 @@ class CavityModelSpace(ModelSpace):
         self.area = 2 * l * (w + h)  # exposed area
         self.omega_c = omega_c
         self.g_e = g_e
+        self.lo = CavityMode(n=0)
+        self.hi = CavityMode(n=1)
 
     def nfock(self, mode):
         return 2
@@ -32,8 +34,8 @@ class CavityModelSpace(ModelSpace):
         return self.modes()
 
     def modes(self):
-        yield CavityMode(n=0)
-        yield CavityMode(n=1)
+        yield self.lo
+        yield self.hi
 
     def get_omega(self, mode):
         if mode.n == 1:
