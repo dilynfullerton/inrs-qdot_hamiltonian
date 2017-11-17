@@ -56,18 +56,15 @@ class CavityModelSpace(ModelSpace):
     def potential(self, mode):
         # TODO: Find a theoretically-justified potential
         def func(r, theta, phi):
-            omega = self.get_omega(mode)
             er = basis_spherical(theta, phi)[0]
             x, y, z = r * er
-            if mode.n == 1 and self.in_volume_region(x, y, z):
+            if self.in_volume_region(x, y, z):
                 xpart = (
-                    np.exp(self.get_omega(mode) * (-x/self.length - 1/2)) +
-                    np.exp(self.get_omega(mode) * (x/self.length - 1/2))
+                    np.exp(self.omega_hi * (-x/self.length - 1/2)) +
+                    np.exp(self.omega_hi * (x/self.length - 1/2))
                 )
-                ypart = np.exp(-4 * y**2 / self.width**2)
-                zpart = np.exp(-4 * z**2 / self.width**2)
                 return (
-                    self.g_e * self.length / omega / 2 * xpart * ypart * zpart
+                    self.g_e * self.length / self.omega_hi / 2 * xpart
                 )
             else:
                 return 0

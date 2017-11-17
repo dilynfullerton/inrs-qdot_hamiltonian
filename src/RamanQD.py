@@ -296,9 +296,16 @@ class RamanQD:
         return (
             (h1 == h2 and self._rule_phonon(e1, e2, ph=phonon)) or
             (e1 == e2 and self._rule_phonon(h1, h2, ph=phonon))
+            # False
         )
 
     def selection_rules_a_b_c_d(self, ehp1, ehp2, ehp3, ph_f, cav_f):
+        if ehp1 == ehp2 or ehp2 == ehp3:
+            return (False,) * 4
+        elif ehp1[0] != ehp2[0] and ehp1[1] != ehp2[1]:
+            return (False,) * 4
+        elif ehp3[0] != ehp2[0] and ehp3[1] != ehp2[1]:
+            return (False,) * 4
         return (
             self.selection_rules_cav_a(
                 ehp1=ehp1, ehp2=ehp2, ehp3=ehp3, ph_f=ph_f, cav_f=cav_f),
@@ -380,11 +387,28 @@ class RamanQD:
 
     def _rule_phonon(self, state1, state2, ph):
         # TODO: Justify this rule from Chamberlain
-        return state1.m == state2.m and abs(state1.l - state2.l) < 2
+        if state1.band == self.ex_space.BAND_VAL:  # No interaction with holes?
+            return False
+        elif state1.band != state2.band:
+            return False
+        elif state1 == state2:  # Force a transition
+            return False
+        elif ph.m != 0:
+            return False
+        elif ph.l % 2 == 0:  # even
+            return (state1.l, state1.m) == (state2.l, state2.m)
+        else:  # odd
+            return abs(state1.l - state2.l) == 1 and state1.m == state2.m
 
     def _rule_cavity(self, state1, state2, cav):
         # TODO: Figure out if this is correct
-        return state1.m == state2.m and abs(state1.l - state2.l) < 2
+        if state1.band != state2.band:
+            return False
+        elif state1 == state2:  # Force a transition
+            return False
+        else:
+            return abs(state1.l - state2.l) == 1
+        # return state1.m == state2.m and abs(state1.l - state2.l) < 2
 
     def matelt_her_p_F(self, ket, omega_s, e_s, n_s):
         # TODO: Make sure this should actually just be the conjugate,
@@ -413,22 +437,24 @@ class RamanQD:
         """
         ebra, hbra = bra
         eket, hket = ket
-        m = 0
         # The m and l requirements follow from selection rules
-        if hbra == hket and ebra.m == eket.m and abs(ebra.l - eket.l) < 2:
-            m += self._integ_e_ph_e(bra=ebra, phonon=ph, ket=eket)
-        if ebra == eket and hbra.m == hket.m and abs(hbra.l - hket.l) < 2:
-            m -= self._integ_e_ph_e(bra=hbra, phonon=ph, ket=hket)
+        if hbra == hket:
+            m = self._integ_e_ph_e(bra=ebra, phonon=ph, ket=eket)
+        elif ebra == eket:
+            m = -self._integ_e_ph_e(bra=hbra, phonon=ph, ket=hket)
+        else:
+            m = 0
         return self.C_F / np.sqrt(self.R) * m
 
     def matelt_hec(self, bra, ket, cav):
         ebra, hbra = bra
         eket, hket = ket
-        melt = 0
         if hbra == hket:
-            melt += self._integ_e_cav_e(bra=ebra, ket=eket, cav=cav)
-        if ebra == eket:
-            melt -= self._integ_e_cav_e(bra=hbra, ket=hket, cav=cav)
+            melt = self._integ_e_cav_e(bra=ebra, ket=eket, cav=cav)
+        elif ebra == eket:
+            melt = -self._integ_e_cav_e(bra=hbra, ket=hket, cav=cav)
+        else:
+            melt = 0
         return melt
 
     def p_cv(self):
@@ -443,13 +469,16 @@ class RamanQD:
         )
 
     def _integ_e_cav_e(self, bra, ket, cav):
-        return _integ_matelt(
-            bra=bra, mid=cav, ket=ket,
-            keyfunc=self._get_key_e_cav_e,
-            storedict=self._e_cav_e_dict,
-            oper=self.cav_space.potential(cav),
-            intfunc=self._integ_e_op_e_volume_spherical,
+        return (
+            self.cav_space.g_e * self.cav_space.area / self.cav_space.length**2
         )
+        # return _integ_matelt(
+        #     bra=bra, mid=cav, ket=ket,
+        #     keyfunc=self._get_key_e_cav_e,
+        #     storedict=self._e_cav_e_dict,
+        #     oper=self.cav_space.potential(cav),
+        #     intfunc=self._integ_e_op_e_volume_spherical,
+        # )
 
     def _integ_e_ph_e(self, bra, phonon, ket):
         return (

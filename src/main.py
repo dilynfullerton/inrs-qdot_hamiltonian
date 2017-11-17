@@ -52,17 +52,17 @@ EXPECTED_ROOTS_HOLES = {
 
 # Cavity parameters
 OMEGA_CAV = (OMEGA_L - OMEGA_T) / 16
-COUPLING_E_CAV = 1.0e-2
-ANTENNA_L = 1.e-5  # [cm]
-ANTENNA_W = 1.e-3  # [cm]
-ANTENNA_H = 1.e-3  # [cm]
+ANTENNA_L = 1.e2  # [nm]
+ANTENNA_W = 1.e3  # [nm]
+ANTENNA_H = 1.e3  # [nm]
+COUPLING_E_CAV = 1.0e-4
 
 # Raman parameters
 E_GAP = 2.097e4 * 1e2  # [cm-1]
 GAMMA_PH = 2
 GAMMA_E = 8.e-4
 GAMMA_H = 8.e-4
-GAMMA_CAV = 4.e-2
+GAMMA_CAV = 4.e-2  # [nm^2]
 # E_GAP = 0
 # GAMMA_A = 8.06554  # [cm-1]
 # GAMMA_B = GAMMA_A
@@ -236,7 +236,8 @@ while True:
     print('  omega_s={}'.format(omega_s))
     eff = ham.differential_raman_cross_section(
         omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
-        omega_s=omega_s, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC
+        omega_s=omega_s, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
+        include_cavity=True,
     )
 
     xdat.append(omega_ph)
