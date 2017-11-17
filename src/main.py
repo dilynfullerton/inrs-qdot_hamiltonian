@@ -1,6 +1,7 @@
 import numpy as np
 from PhononsModelSpace import PhononModelSpace
 from ExitonModelSpace import ExitonModelSpace
+from CavityModelSpace import CavityModelSpace
 from RamanQD import RamanQD
 from matplotlib import pyplot as plt
 from os import path
@@ -49,11 +50,19 @@ EXPECTED_ROOTS_HOLES = {
     1: (0, [4.12112, 7.09644, 10.0319, 12.94567])
 }
 
+# Cavity parameters
+OMEGA_CAV = (OMEGA_L - OMEGA_T) / 16
+COUPLING_E_CAV = 1.0e-2
+ANTENNA_L = 1.e-5  # [cm]
+ANTENNA_W = 1.e-3  # [cm]
+ANTENNA_H = 1.e-3  # [cm]
+
 # Raman parameters
 E_GAP = 2.097e4 * 1e2  # [cm-1]
 GAMMA_PH = 2
 GAMMA_E = 8.e-4
 GAMMA_H = 8.e-4
+GAMMA_CAV = 4.e-2
 # E_GAP = 0
 # GAMMA_A = 8.06554  # [cm-1]
 # GAMMA_B = GAMMA_A
@@ -161,19 +170,37 @@ exiton_space = ExitonModelSpace(
 # exiton_space.plot_root_fn_holes(l=0, xdat=XDAT_X, show=True)
 # exiton_space.plot_root_fn_holes(l=1, xdat=XDAT_X, show=True)
 
+
+# Get cavity space
+cavity_space = CavityModelSpace(
+    l=ANTENNA_L, w=ANTENNA_W, h=ANTENNA_H,
+    omega_c=OMEGA_CAV,
+    g_e=COUPLING_E_CAV,
+)
+
 # Make system Hamiltonian
 SAVENAME = 'savedham'
 if not path.exists(SAVENAME):
     ham = RamanQD(
         phonon_space=phonon_space,
         exiton_space=exiton_space,
+        cavity_space=cavity_space,
         phonon_lifetime=GAMMA_PH,
         electron_lifetime=GAMMA_E,
         hole_lifetime=GAMMA_H,
+        cavity_lifetime=GAMMA_CAV,
     )
+    print('Computing non-cavity matrix elements')
     ham.differential_raman_cross_section(
         omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
         omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
+        include_cavity=False,
+    )
+    print('Computing cavity matrix elements')
+    ham.differential_raman_cross_section(
+        omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
+        omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
+        include_cavity=True,
     )
     with open(SAVENAME, 'wb') as fwb:
         pickle.dump(ham, fwb)

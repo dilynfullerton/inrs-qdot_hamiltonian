@@ -5,6 +5,7 @@ functions for interactions with phonon modes and electron/hole modes
 import numpy as np
 from ModelSpace import ModelSpace
 from collections import namedtuple
+from helper_functions import basis_spherical
 
 
 CavityMode = namedtuple('CavityMode', ['n'])
@@ -45,15 +46,28 @@ class CavityModelSpace(ModelSpace):
         else:
             return 0
 
+    def in_volume_region(self, x, y, z):
+        return (
+            -self.length/2 < x < self.length/2 and
+            -self.width/2 < y < self.width/2 and
+            -self.height/2 < z < self.height/2
+        )
+
     def potential(self, mode):
         # TODO: Find a theoretically-justified potential
         def func(r, theta, phi):
             omega = self.get_omega(mode)
-            x = r * np.sin(theta) * np.cos(phi)
-            if mode.n == 1 and -self.length/2 <= x <= self.length/2:
-                return self.g_e * self.length / omega / 2 * (
+            er = basis_spherical(theta, phi)[0]
+            x, y, z = r * er
+            if mode.n == 1 and self.in_volume_region(x, y, z):
+                xpart = (
                     np.exp(self.get_omega(mode) * (-x/self.length - 1/2)) +
                     np.exp(self.get_omega(mode) * (x/self.length - 1/2))
+                )
+                ypart = np.exp(-4 * y**2 / self.width**2)
+                zpart = np.exp(-4 * z**2 / self.width**2)
+                return (
+                    self.g_e * self.length / omega / 2 * xpart * ypart * zpart
                 )
             else:
                 return 0

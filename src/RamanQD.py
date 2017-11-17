@@ -38,7 +38,7 @@ class RamanQD:
     def __init__(
             self, phonon_space, exiton_space, phonon_lifetime,
             electron_lifetime, hole_lifetime,
-            cavity_space=None
+            cavity_space=None, cavity_lifetime=None,
     ):
         # Model parameters
         self.ph_space = phonon_space
@@ -49,6 +49,7 @@ class RamanQD:
         self.gamma_ph = phonon_lifetime
         self.gamma_e = electron_lifetime
         self.gamma_h = hole_lifetime
+        self.gamma_cav = cavity_lifetime
 
         # Convenience references
         self.volume = self.ph_space.volume
