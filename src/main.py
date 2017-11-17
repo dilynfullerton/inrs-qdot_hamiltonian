@@ -26,8 +26,30 @@ EPS_INF_IN = 5.72
 EPS_INF_OUT = 4.64
 XDAT_MU = np.linspace(1e-6, 10, 10000)
 EXPECTED_ROOTS_PHONON = {
-    0: (0, [1.65, 4.04, 4.50, 5.29, 6.14, 6.74, 7.16, 7.42, 7.55]),
-    1: (0, [3.18, 4.80, 5.26, 5.78, 6.48, 6.63, 7.01, 7.35, 7.57]),
+    0: (0, [
+        # 0.01,
+        # 1.65,
+        # 4.04,
+        # 4.50,
+        # 5.29,
+        # 6.14,
+        # 6.74,
+        # 7.16,
+        # 7.42,
+        # 7.55,
+    ]),
+    1: (0, [
+        0.01,
+        3.18,
+        4.80,
+        5.26,
+        5.78,
+        6.48,
+        6.63,
+        7.01,
+        7.35,
+        7.57,
+    ]),
 }
 
 # Exiton parameters
@@ -196,12 +218,12 @@ if not path.exists(SAVENAME):
         omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
         include_cavity=False,
     )
-    print('Computing cavity matrix elements')
-    ham.differential_raman_cross_section(
-        omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
-        omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
-        include_cavity=True,
-    )
+    # print('Computing cavity matrix elements')
+    # ham.differential_raman_cross_section(
+    #     omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
+    #     omega_s=OMEGA_SEC, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
+    #     include_cavity=True,
+    # )
     print('Saving matrix elements locally')
     with open(SAVENAME, 'wb') as fwb:
         pickle.dump(ham, fwb)
@@ -237,7 +259,7 @@ while True:
     eff = ham.differential_raman_cross_section(
         omega_l=OMEGA_LASER, e_l=POLAR_LASER, n_l=REFRACTION_IDX_LASER,
         omega_s=omega_s, e_s=POLAR_SEC, n_s=REFRACTION_IDX_SEC,
-        include_cavity=True,
+        include_cavity=False,
     )
 
     xdat.append(omega_ph)
