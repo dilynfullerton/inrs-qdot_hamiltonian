@@ -95,8 +95,8 @@ for s in phonon_space.states():
 # plt.show()
 
 # Plot roots for phonon potential
-# phonon_space.plot_root_function_mu(l=0, xdat=XDAT_MU, show=True)
-# phonon_space.plot_root_function_mu(l=1, xdat=XDAT_MU, show=True)
+phonon_space.plot_root_function_mu(l=0, xdat=XDAT_MU, show=True)
+phonon_space.plot_root_function_mu(l=1, xdat=XDAT_MU, show=True)
 
 # Get exiton space
 exiton_space = ExitonModelSpace(
