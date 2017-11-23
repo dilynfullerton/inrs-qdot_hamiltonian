@@ -277,6 +277,12 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         ylog /= lin.norm(ylog, ord=2)
         ax.plot(xdat, ylog, '--', color='brown')
 
+        # Plot ellipse which surrounds regions of imaginary Q
+        ypr = np.real(np.sqrt([self._nu_from_mu(mu=mu) for mu in mudat]))
+        ypr /= lin.norm(ypr, ord=2)
+        ax.plot(xdat, ypr, '-.', color='cyan')
+        ax.plot(xdat, -ypr, '-.', color='cyan')
+
         # Region of imaginary Q
         span_imQ = None
         x_min_imQ = max(min(xdat), -self.high_mu)
