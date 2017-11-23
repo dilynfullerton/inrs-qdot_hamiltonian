@@ -241,8 +241,7 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         return np.sqrt(self._beta_div2 * mu ** 2 - self.R ** 2 * self.gamma)
 
     def plot_root_function_mu(self, l, xdat, show=True):
-        mudat_p = xdat
-        mudat_m = -xdat
+        mudat = xdat
         fn = self._get_root_function(l=l)
 
         def rootfn(xy):
@@ -258,16 +257,14 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
 
         # Plot axes
         ax.axhline(0, color='gray', lw=1, alpha=.5)
-        ax.axvline(0, color='gray', lw=1, alpha=.5)
+        if min(xdat) < 0 < max(xdat):
+            ax.axvline(0, color='gray', lw=1, alpha=.5)
 
         # Plot high_mu boundaries
-        ax.axvline(self.high_mu, ls='-', color='black', lw=1, alpha=.5)
-        ax.axvline(-self.high_mu, ls='-', color='black', lw=1, alpha=.5)
-
-        xdat = np.concatenate((-xdat, xdat))
-        xdat.sort()
-        mudat = np.concatenate((mudat_m, mudat_p))
-        mudat.sort()
+        if min(xdat) <= self.high_mu <= max(xdat):
+            ax.axvline(self.high_mu, ls='-', color='black', lw=1, alpha=.5)
+        if min(xdat) <= -self.high_mu <= max(xdat):
+            ax.axvline(-self.high_mu, ls='-', color='black', lw=1, alpha=.5)
 
         # Plot real and imaginary parts of the root function
         ydat = np.array([fpr(x) for x in mudat])
@@ -281,19 +278,29 @@ class PhononModelSpace(ModelSpace, RootSolverComplex2d):
         ax.plot(xdat, ylog, '--', color='brown')
 
         # Region of imaginary Q
+        span_imQ = None
         x_min_imQ = max(min(xdat), -self.high_mu)
         x_max_imQ = min(max(xdat), self.high_mu)
-        span_imQ = ax.axvspan(x_min_imQ, x_max_imQ, color='blue', alpha=.3)
+        if x_min_imQ < x_max_imQ:
+            span_imQ = ax.axvspan(x_min_imQ, x_max_imQ, color='blue', alpha=.3)
 
         # Regions of real Q
+        span_reQ = None
         x_min_reQ = max(min(xdat), self.high_mu)
         x_max_reQ = max(xdat)
-        span_reQ = ax.axvspan(x_min_reQ, x_max_reQ, color='red', alpha=.3)
-        ax.axvspan(-x_max_reQ, -x_min_reQ, color='red', alpha=.3)
+        if x_min_reQ < x_max_reQ:
+            span_reQ = ax.axvspan(x_min_reQ, x_max_reQ, color='red', alpha=.3)
+        x_min_reQ_m = min(xdat)
+        x_max_reQ_m = min(max(xdat), -self.high_mu)
+        if x_min_reQ_m < x_max_reQ_m:
+            span_reQ = ax.axvspan(x_min_reQ_m, x_max_reQ_m, color='red', alpha=.3)
 
         # Roots
         for mu, n in self.iter_mu_n(l=l):
-            ax.axvline(mu.real, ls='--', color='green', lw=1, alpha=.5)
+            if min(xdat) < mu.real < max(xdat):
+                ax.axvline(mu.real, ls='--', color='green', lw=1, alpha=.5)
+            else:
+                print('Root out of range: mu={}'.format(mu.real))
 
         # Title and legend
         ax.set_title('Phonon root function for l = {}'.format(l))
