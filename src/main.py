@@ -20,31 +20,22 @@ NMAX_PHONON = 9
 LMAX_PHONON = 1
 OMEGA_L = 305  # [cm-1]
 OMEGA_T = 238  # [cm-1]
-BETA_L = 5.04e1 * 3  # [nm/cm]
-BETA_T = 1.58e1 * 3  # [nm/cm]
+BETA_L = 5.04e1 * 3.2  # [nm/cm]
+BETA_T = 1.58e1 * 3.2  # [nm/cm]
 EPS_INF_IN = 5.72
-EPS_INF_OUT = 4.64
-XDAT_MU = np.linspace(1e-6, 10, 10000)
+# EPS_INF_OUT = 4.64
+EPS_INF_OUT = 1
+XDAT_MU = np.linspace(-1e-6, 3, 10000)
 EXPECTED_ROOTS_PHONON = {
     0: (0, [
-        0.01,
-        0.55,
-        2.05,
-        2.47,
-        # 1.65,
-        # 4.04,
-        # 4.50,
-        # 5.29,
-        # 6.14,
-        # 6.74,
-        # 7.16,
-        # 7.42,
-        # 7.55,
+        # 0.01,
+        # 1.84,
+        # 2.31,
     ]),
     1: (0, [
         0.01,
-        1.63,
-        2.52,
+        2.24,
+        2.36,
         # 3.18,
         # 4.80,
         # 5.26,
